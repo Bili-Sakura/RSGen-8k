@@ -58,6 +58,7 @@ def run_megafusion(
     if_reschedule: bool,
     device: torch.device,
     weight_dtype: torch.dtype,
+    generator: Optional[torch.Generator] = None,
 ) -> Image.Image:
     """Execute the MegaFusion multi-stage generation loop.
 
@@ -111,7 +112,7 @@ def run_megafusion(
                 (res, res), Image.Resampling.BICUBIC
             )
             latents = _encode_image(x_0_predict, vae, device, weight_dtype)
-            noise = torch.randn_like(latents)
+            noise = torch.randn(latents.shape, generator=generator, device="cpu", dtype=latents.dtype).to(device)
 
             sched = schedulers[stage_idx]
             pipeline.scheduler = sched if if_reschedule else schedulers[0]

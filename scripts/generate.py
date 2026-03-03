@@ -78,6 +78,8 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--deterministic", action="store_true",
+                        help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
     parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
     parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
 
@@ -112,7 +114,7 @@ def main():
     for key in ("model_path", "model_name", "technique", "negative_prompt",
                 "output_dir", "ckpt_dir", "seed", "mixed_precision", "guidance_scale",
                 "num_inference_steps", "stage_resolutions", "stage_steps",
-                "if_reschedule", "if_dilation"):
+                "if_reschedule", "if_dilation", "deterministic"):
         val = getattr(args, key, None)
         if val is not None:
             setattr(config, key, val)

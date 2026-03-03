@@ -20,6 +20,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+import numpy as np
 import torch
 import yaml
 from PIL import Image
@@ -64,6 +65,7 @@ class GenerationConfig:
     if_dilation: bool = False
     enable_xformers: bool = True
     vae_tiling: bool = True
+    deterministic: bool = False
 
     @classmethod
     def from_yaml(cls, path: str) -> "GenerationConfig":
@@ -79,6 +81,30 @@ def _get_weight_dtype(mixed_precision: str) -> torch.dtype:
     elif mixed_precision == "bf16":
         return torch.bfloat16
     return torch.float32
+
+
+def _seed_everything(seed: int) -> None:
+    """Seed all random number generators for reproducibility.
+
+    Seeds ``random``, ``numpy``, and ``torch`` (CPU & CUDA) so that
+    subsequent calls to any of these libraries produce the same
+    sequence of random numbers.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _make_generator(seed: int) -> torch.Generator:
+    """Create a CPU ``torch.Generator`` for cross-platform reproducible sampling.
+
+    Using a CPU generator is the recommended practice from diffusers
+    because GPU random number generators differ across hardware.  The
+    resulting tensors are then moved to the target device.
+    """
+    return torch.Generator(device="cpu").manual_seed(seed)
 
 
 def load_pipeline(config: GenerationConfig, device: torch.device):
@@ -203,19 +229,34 @@ def generate(config: GenerationConfig) -> Image.Image:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     weight_dtype = _get_weight_dtype(config.mixed_precision)
 
+    # --- Reproducibility setup ---
+    sample_seed = config.seed if config.seed is not None else random.randint(0, 100_000)
+    _seed_everything(sample_seed)
+
+    if config.deterministic:
+        # Enable fully deterministic CUDA algorithms (may reduce performance)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":16:8")
+        try:
+            torch.use_deterministic_algorithms(True)
+        except Exception:
+            logger.warning("Could not enable deterministic algorithms on this platform")
+
+    # Use a CPU generator for cross-platform reproducible noise generation.
+    # GPU generators produce hardware-dependent results.
+    generator = _make_generator(sample_seed)
+    logger.info("Using seed %d (deterministic=%s)", sample_seed, config.deterministic)
+
     technique_key = config.technique.lower()
     technique_info = get_technique(technique_key)
     logger.info("Using technique: %s", technique_info.name)
 
     pipeline, vae, schedulers = load_pipeline(config, device)
 
-    sample_seed = config.seed if config.seed is not None else random.randint(0, 100_000)
-    generator = torch.Generator(device=device).manual_seed(sample_seed)
-    logger.info("Using seed %d", sample_seed)
-
     base_res = config.stage_resolutions[0]
     shape = (1, vae.config.latent_channels, base_res // 8, base_res // 8)
-    noise_latents = torch.randn(shape, generator=generator, device=device, dtype=weight_dtype)
+    noise_latents = torch.randn(shape, generator=generator, device="cpu", dtype=weight_dtype).to(device)
 
     resolutions = config.stage_resolutions
     steps = config.stage_steps
@@ -252,6 +293,7 @@ def generate(config: GenerationConfig) -> Image.Image:
                 if_reschedule=config.if_reschedule,
                 device=device,
                 weight_dtype=weight_dtype,
+                generator=generator,
             )
         else:
             # For non-MegaFusion techniques, use a unified multi-stage loop
@@ -271,6 +313,7 @@ def generate(config: GenerationConfig) -> Image.Image:
                 if_reschedule=config.if_reschedule,
                 device=device,
                 weight_dtype=weight_dtype,
+                generator=generator,
             )
 
     output_path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_{resolutions[-1]}px.png")
@@ -295,6 +338,7 @@ def _run_technique_multistage(
     if_reschedule: bool,
     device: torch.device,
     weight_dtype: torch.dtype,
+    generator: Optional[torch.Generator] = None,
 ) -> Image.Image:
     """Run multi-stage generation using a per-step technique.
 
@@ -329,7 +373,7 @@ def _run_technique_multistage(
         else:
             x_0_predict = x_0_predict.resize((res, res), Image.Resampling.BICUBIC)
             latents = _encode_image(x_0_predict, vae, device, weight_dtype)
-            noise = torch.randn_like(latents)
+            noise = torch.randn(latents.shape, generator=generator, device="cpu", dtype=latents.dtype).to(device)
             noisy_idx = min(4, len(stage_ts) - 1) if if_reschedule else 0
             latents = pipeline.scheduler.add_noise(latents, noise, stage_ts[noisy_idx])
 
@@ -456,6 +500,8 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--deterministic", action="store_true",
+                        help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
     parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
     parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
     args = parser.parse_args()
@@ -486,7 +532,8 @@ def main():
     for key in ("model_path", "model_name", "technique", "prompt",
                 "negative_prompt", "output_dir", "ckpt_dir", "seed",
                 "mixed_precision", "guidance_scale", "num_inference_steps",
-                "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation"):
+                "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation",
+                "deterministic"):
         val = getattr(args, key, None)
         if val is not None:
             setattr(config, key, val)

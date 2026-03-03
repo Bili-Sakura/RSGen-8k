@@ -78,6 +78,7 @@ def _make_run_generation(ckpt_dir: str = "./ckpt"):
         mixed_precision: str,
         enable_reschedule: bool,
         enable_vae_tiling: bool,
+        deterministic: bool,
     ):
         """Run generation and return the resulting image."""
         # Resolve resolution stages
@@ -114,6 +115,7 @@ def _make_run_generation(ckpt_dir: str = "./ckpt"):
             mixed_precision=mixed_precision,
             if_reschedule=enable_reschedule,
             vae_tiling=enable_vae_tiling,
+            deterministic=deterministic,
             output_dir="./outputs/gradio",
             ckpt_dir=ckpt_dir,
         )
@@ -244,6 +246,10 @@ def build_demo(ckpt_dir: str = "./ckpt") -> gr.Blocks:
                         label="VAE Tiling",
                         value=True,
                     )
+                    deterministic = gr.Checkbox(
+                        label="Deterministic",
+                        value=False,
+                    )
 
                 generate_btn = gr.Button("🚀 Generate", variant="primary", size="lg")
 
@@ -277,6 +283,7 @@ def build_demo(ckpt_dir: str = "./ckpt") -> gr.Blocks:
                 mixed_precision,
                 enable_reschedule,
                 enable_vae_tiling,
+                deterministic,
             ],
             outputs=[output_image],
         )

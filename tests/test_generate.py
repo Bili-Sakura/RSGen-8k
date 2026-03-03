@@ -4,6 +4,7 @@ import os
 import tempfile
 
 import pytest
+import torch
 import yaml
 
 from rsgen8k.generate import (
@@ -120,3 +121,95 @@ class TestGenerationConfig:
     def test_ckpt_dir_custom(self):
         config = GenerationConfig(ckpt_dir="/data/models")
         assert config.ckpt_dir == "/data/models"
+
+    def test_deterministic_default(self):
+        """Deterministic mode defaults to False."""
+        config = GenerationConfig()
+        assert config.deterministic is False
+
+    def test_deterministic_enabled(self):
+        config = GenerationConfig(deterministic=True)
+        assert config.deterministic is True
+
+    def test_from_yaml_with_deterministic(self):
+        data = {
+            "model_path": "test/model",
+            "prompt": "test",
+            "deterministic": True,
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(data, f)
+            tmp_path = f.name
+        try:
+            config = GenerationConfig.from_yaml(tmp_path)
+            assert config.deterministic is True
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestReproducibility:
+    """Tests for deterministic sampling helpers."""
+
+    def test_seed_everything_seeds_random(self):
+        """_seed_everything should make random.random() deterministic."""
+        import random
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = random.random()
+        _seed_everything(42)
+        b = random.random()
+        assert a == b
+
+    def test_seed_everything_seeds_numpy(self):
+        """_seed_everything should make numpy random deterministic."""
+        import numpy as np
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = np.random.rand()
+        _seed_everything(42)
+        b = np.random.rand()
+        assert a == b
+
+    def test_seed_everything_seeds_torch(self):
+        """_seed_everything should make torch random deterministic."""
+        import torch
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = torch.randn(3)
+        _seed_everything(42)
+        b = torch.randn(3)
+        assert torch.equal(a, b)
+
+    def test_make_generator_is_cpu(self):
+        """_make_generator should return a CPU generator."""
+        from rsgen8k.generate import _make_generator
+
+        gen = _make_generator(42)
+        assert gen.device == torch.device("cpu")
+
+    def test_make_generator_deterministic_output(self):
+        """Same seed should produce identical noise tensors."""
+        from rsgen8k.generate import _make_generator
+
+        gen1 = _make_generator(123)
+        t1 = torch.randn(2, 4, 8, 8, generator=gen1)
+
+        gen2 = _make_generator(123)
+        t2 = torch.randn(2, 4, 8, 8, generator=gen2)
+
+        assert torch.equal(t1, t2)
+
+    def test_different_seeds_produce_different_output(self):
+        """Different seeds should produce different noise tensors."""
+        from rsgen8k.generate import _make_generator
+
+        gen1 = _make_generator(42)
+        t1 = torch.randn(2, 4, 8, 8, generator=gen1)
+
+        gen2 = _make_generator(99)
+        t2 = torch.randn(2, 4, 8, 8, generator=gen2)
+
+        assert not torch.equal(t1, t2)

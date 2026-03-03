@@ -56,7 +56,7 @@ RSGen-8k/
 │   ├── benchmark_seeds.sh    # Multi-seed reproducibility benchmark
 │   ├── generate_dataset.sh   # Batch generation from XLRS-Bench
 │   └── evaluate.sh           # Image quality evaluation (FID, CLIP-Score, etc.)
-├── tests/                # Unit tests (70 tests)
+├── tests/                # Unit tests (86 tests)
 ├── manuscript/           # Paper / manuscript materials
 └── outputs/              # Generated images (gitignored contents)
 ```
@@ -232,6 +232,38 @@ Applies low-pass Fourier filtering to noise predictions, suppressing high-freque
 ### Noise Rescheduling
 
 MegaFusion optionally applies resolution-dependent noise rescheduling that adjusts the noise schedule based on the upscale factor, preventing artifacts at high resolutions. Enable with `--if_reschedule`.
+
+## Reproducibility
+
+Diffusion is a stochastic process — different runs produce different outputs. RSGen-8k provides built-in controls for deterministic, reproducible generation:
+
+### Seed Control
+
+All random number generators (`random`, `numpy`, `torch`) are seeded when a `--seed` is provided. A CPU `torch.Generator` is used for noise generation to ensure cross-platform consistency (GPU generators produce hardware-dependent results).
+
+```bash
+# Same seed → same output (within platform tolerance)
+python scripts/generate.py --prompt "Coastal city" --seed 42
+python scripts/generate.py --prompt "Coastal city" --seed 42  # identical output
+```
+
+> **Tip:** The CPU generator is used automatically — you don't need to do anything special. Just provide `--seed` for reproducible results.
+
+### Full Determinism
+
+For bit-exact reproducibility (e.g. testing, benchmarking), enable `--deterministic`:
+
+```bash
+python scripts/generate.py --prompt "Coastal city" --seed 42 --deterministic
+```
+
+This enables:
+- `torch.use_deterministic_algorithms(True)` — forces deterministic CUDA kernels
+- `torch.backends.cudnn.deterministic = True` — disables non-deterministic cuDNN ops
+- `torch.backends.cudnn.benchmark = False` — disables auto-tuning
+- `CUBLAS_WORKSPACE_CONFIG=:16:8` — single buffer size for cuBLAS
+
+> **Note:** Deterministic mode may reduce performance. See PyTorch's [Reproducibility](https://pytorch.org/docs/stable/notes/randomness.html) guide for details.
 
 ## Running Tests
 

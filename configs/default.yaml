@@ -49,6 +49,11 @@ stage_steps:
 if_reschedule: false
 if_dilation: false
 
+# Reproducibility — enable for fully deterministic CUDA algorithms.
+# Uses CPU torch.Generator and seeds random/numpy/torch.
+# When true, also enables torch.use_deterministic_algorithms(True).
+deterministic: false
+
 # Performance options
 enable_xformers: true
 vae_tiling: true
