@@ -1,0 +1,43 @@
+# RSGen-8k Default Generation Configuration
+# ===========================================
+# Base model: Text2Earth  (https://huggingface.co/lcybuaa/Text2Earth)
+# Technique:  MegaFusion  (https://github.com/haoningwu3639/MegaFusion)
+# Prompts:    XLRS-Bench  (https://huggingface.co/datasets/initiacms/XLRS-Bench_caption_en)
+
+model_path: "lcybuaa/Text2Earth"
+
+prompt: "A high-resolution satellite image of an urban area with dense buildings, roads and vegetation."
+negative_prompt: ""
+
+output_dir: "./outputs"
+seed: 42
+
+mixed_precision: "fp16"
+guidance_scale: 7.0
+num_inference_steps: 50
+
+# Multi-stage progressive resolutions (base → 8K)
+# Each stage upscales the previous result via bicubic interpolation,
+# re-encodes into latent space, adds noise, and denoises for a few steps.
+stage_resolutions:
+  - 512    # Stage 1: base resolution (full denoising)
+  - 1024   # Stage 2: 2× upscale
+  - 2048   # Stage 3: 4× upscale
+  - 4096   # Stage 4: 8× upscale
+  - 8192   # Stage 5: 16× upscale (8K)
+
+# Number of denoising steps per stage (must sum ≤ num_inference_steps)
+stage_steps:
+  - 40     # Stage 1: majority of steps at base resolution
+  - 3      # Stage 2
+  - 3      # Stage 3
+  - 2      # Stage 4
+  - 2      # Stage 5
+
+# MegaFusion options
+if_reschedule: false
+if_dilation: false
+
+# Performance options
+enable_xformers: true
+vae_tiling: true
