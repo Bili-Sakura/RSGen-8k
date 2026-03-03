@@ -39,6 +39,9 @@ DEFAULT_STAGE_STEPS = [40, 3, 3, 2, 2]
 
 TEXT2EARTH_MODEL_ID = "lcybuaa/Text2Earth"
 
+# Upper bound for randomly chosen seeds when no explicit seed is given.
+MAX_RANDOM_SEED = 2**32 - 1
+
 # Available model and technique keys (for CLI help)
 AVAILABLE_MODELS = list(MODEL_REGISTRY.keys())
 AVAILABLE_TECHNIQUES = list(TECHNIQUE_REGISTRY.keys())
@@ -230,7 +233,7 @@ def generate(config: GenerationConfig) -> Image.Image:
     weight_dtype = _get_weight_dtype(config.mixed_precision)
 
     # --- Reproducibility setup ---
-    sample_seed = config.seed if config.seed is not None else random.randint(0, 100_000)
+    sample_seed = config.seed if config.seed is not None else random.randint(0, MAX_RANDOM_SEED)
     _seed_everything(sample_seed)
 
     if config.deterministic:

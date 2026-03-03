@@ -1,6 +1,7 @@
 """Tests for the generation configuration."""
 
 import os
+import random
 import tempfile
 
 import pytest
@@ -152,7 +153,6 @@ class TestReproducibility:
 
     def test_seed_everything_seeds_random(self):
         """_seed_everything should make random.random() deterministic."""
-        import random
         from rsgen8k.generate import _seed_everything
 
         _seed_everything(42)
