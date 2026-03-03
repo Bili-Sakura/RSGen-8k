@@ -60,66 +60,68 @@ RESOLUTION_PRESETS = {
     },
 }
 
-# Global ckpt_dir (set via CLI)
-_ckpt_dir: str = "./ckpt"
 
+def _make_run_generation(ckpt_dir: str = "./ckpt"):
+    """Create a generation function bound to the given checkpoint directory."""
 
-def _run_generation(
-    model_name: str,
-    technique: str,
-    prompt: str,
-    negative_prompt: str,
-    seed: int,
-    guidance_scale: float,
-    num_inference_steps: int,
-    resolution_preset: str,
-    custom_resolutions: str,
-    custom_steps: str,
-    mixed_precision: str,
-    enable_reschedule: bool,
-    enable_vae_tiling: bool,
-):
-    """Run generation and return the resulting image."""
-    # Resolve resolution stages
-    if resolution_preset != "Custom":
-        preset = RESOLUTION_PRESETS[resolution_preset]
-        res_str = preset["resolutions"]
-        steps_str = preset["steps"]
-    else:
-        res_str = custom_resolutions.strip()
-        steps_str = custom_steps.strip()
+    def _run_generation(
+        model_name: str,
+        technique: str,
+        prompt: str,
+        negative_prompt: str,
+        seed: int,
+        guidance_scale: float,
+        num_inference_steps: int,
+        resolution_preset: str,
+        custom_resolutions: str,
+        custom_steps: str,
+        mixed_precision: str,
+        enable_reschedule: bool,
+        enable_vae_tiling: bool,
+    ):
+        """Run generation and return the resulting image."""
+        # Resolve resolution stages
+        if resolution_preset != "Custom":
+            preset = RESOLUTION_PRESETS[resolution_preset]
+            res_str = preset["resolutions"]
+            steps_str = preset["steps"]
+        else:
+            res_str = custom_resolutions.strip()
+            steps_str = custom_steps.strip()
 
-    try:
-        stage_resolutions = [int(x) for x in res_str.split()]
-        stage_steps = [int(x) for x in steps_str.split()]
-    except ValueError:
-        raise gr.Error("Invalid resolution or steps format. Use space-separated integers.")
+        try:
+            stage_resolutions = [int(x) for x in res_str.split()]
+            stage_steps = [int(x) for x in steps_str.split()]
+        except ValueError:
+            raise gr.Error("Invalid resolution or steps format. Use space-separated integers.")
 
-    if len(stage_resolutions) != len(stage_steps):
-        raise gr.Error(
-            f"Number of resolutions ({len(stage_resolutions)}) must match "
-            f"number of step values ({len(stage_steps)})."
+        if len(stage_resolutions) != len(stage_steps):
+            raise gr.Error(
+                f"Number of resolutions ({len(stage_resolutions)}) must match "
+                f"number of step values ({len(stage_steps)})."
+            )
+
+        config = GenerationConfig(
+            model_name=model_name.lower(),
+            technique=technique.lower(),
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            seed=seed if seed >= 0 else None,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            stage_resolutions=stage_resolutions,
+            stage_steps=stage_steps,
+            mixed_precision=mixed_precision,
+            if_reschedule=enable_reschedule,
+            vae_tiling=enable_vae_tiling,
+            output_dir="./outputs/gradio",
+            ckpt_dir=ckpt_dir,
         )
 
-    config = GenerationConfig(
-        model_name=model_name.lower(),
-        technique=technique.lower(),
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        seed=seed if seed >= 0 else None,
-        guidance_scale=guidance_scale,
-        num_inference_steps=num_inference_steps,
-        stage_resolutions=stage_resolutions,
-        stage_steps=stage_steps,
-        mixed_precision=mixed_precision,
-        if_reschedule=enable_reschedule,
-        vae_tiling=enable_vae_tiling,
-        output_dir="./outputs/gradio",
-        ckpt_dir=_ckpt_dir,
-    )
+        image = generate(config)
+        return image
 
-    image = generate(config)
-    return image
+    return _run_generation
 
 
 def _update_preset(preset_name):
@@ -133,8 +135,13 @@ def _update_preset(preset_name):
     )
 
 
-def build_demo() -> gr.Blocks:
-    """Construct the Gradio interface."""
+def build_demo(ckpt_dir: str = "./ckpt") -> gr.Blocks:
+    """Construct the Gradio interface.
+
+    Args:
+        ckpt_dir: Local checkpoint directory for model loading.
+    """
+    run_generation = _make_run_generation(ckpt_dir)
     model_choices = list(AVAILABLE_MODELS)
     technique_choices = list(AVAILABLE_TECHNIQUES)
     preset_choices = list(RESOLUTION_PRESETS.keys()) + ["Custom"]
@@ -147,7 +154,10 @@ def build_demo() -> gr.Blocks:
 
     tech_info_lines = []
     for key, info in list_techniques().items():
-        tech_info_lines.append(f"**{key}** — {info.name}: {info.description[:100]}")
+        desc = info.description
+        if len(desc) > 100:
+            desc = desc[:100].rsplit(" ", 1)[0] + "…"
+        tech_info_lines.append(f"**{key}** — {info.name}: {desc}")
     tech_info_md = "\n\n".join(tech_info_lines)
 
     with gr.Blocks(
@@ -252,7 +262,7 @@ def build_demo() -> gr.Blocks:
 
         # Wire generate button
         generate_btn.click(
-            fn=_run_generation,
+            fn=run_generation,
             inputs=[
                 model_name,
                 technique,
@@ -281,8 +291,6 @@ def build_demo() -> gr.Blocks:
 
 
 def main():
-    global _ckpt_dir
-
     parser = argparse.ArgumentParser(description="RSGen-8k Gradio Web Demo")
     parser.add_argument("--port", type=int, default=7860, help="Port to serve on (default: 7860)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
@@ -293,10 +301,9 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    _ckpt_dir = args.ckpt_dir
-    logger.info("Checkpoint directory: %s", os.path.abspath(_ckpt_dir))
+    logger.info("Checkpoint directory: %s", os.path.abspath(args.ckpt_dir))
 
-    demo = build_demo()
+    demo = build_demo(ckpt_dir=args.ckpt_dir)
     demo.launch(
         server_name=args.host,
         server_port=args.port,
