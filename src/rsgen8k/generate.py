@@ -105,7 +105,7 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
     unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
 
     # Build one scheduler per resolution stage
-    schedulers: list[MegaFusionDDIMScheduler] = []
+    schedulers: List[MegaFusionDDIMScheduler] = []
     for res in config.stage_resolutions:
         sched = MegaFusionDDIMScheduler.from_pretrained(
             model_path,
@@ -195,7 +195,7 @@ def generate(config: GenerationConfig) -> Image.Image:
         sched.set_timesteps(num_steps, device=device)
 
     cumulative = 0
-    stage_timesteps_list: list[torch.Tensor] = []
+    stage_timesteps_list: List[torch.Tensor] = []
     for i, n_steps in enumerate(steps):
         ts = schedulers[i].timesteps[cumulative: cumulative + n_steps]
         stage_timesteps_list.append(ts)
