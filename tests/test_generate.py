@@ -1,0 +1,215 @@
+"""Tests for the generation configuration."""
+
+import os
+import random
+import tempfile
+
+import pytest
+import torch
+import yaml
+
+from rsgen8k.generate import (
+    GenerationConfig,
+    DEFAULT_STAGE_RESOLUTIONS,
+    DEFAULT_STAGE_STEPS,
+    AVAILABLE_MODELS,
+    AVAILABLE_TECHNIQUES,
+)
+
+
+class TestGenerationConfig:
+    """Tests for GenerationConfig dataclass."""
+
+    def test_default_values(self):
+        config = GenerationConfig()
+        assert config.model_path == "lcybuaa/Text2Earth"
+        assert config.model_name == "text2earth"
+        assert config.technique == "megafusion"
+        assert config.guidance_scale == 7.0
+        assert config.num_inference_steps == 50
+        assert config.stage_resolutions == list(DEFAULT_STAGE_RESOLUTIONS)
+        assert config.stage_steps == list(DEFAULT_STAGE_STEPS)
+
+    def test_stage_steps_sum_within_budget(self):
+        """Total steps across stages should not exceed num_inference_steps."""
+        config = GenerationConfig()
+        assert sum(config.stage_steps) <= config.num_inference_steps
+
+    def test_resolutions_and_steps_match(self):
+        """Number of resolution stages must match number of step allocations."""
+        config = GenerationConfig()
+        assert len(config.stage_resolutions) == len(config.stage_steps)
+
+    def test_resolutions_are_increasing(self):
+        config = GenerationConfig()
+        for i in range(len(config.stage_resolutions) - 1):
+            assert config.stage_resolutions[i] < config.stage_resolutions[i + 1]
+
+    def test_resolutions_divisible_by_8(self):
+        """All resolutions must be divisible by 8 for the VAE."""
+        config = GenerationConfig()
+        for res in config.stage_resolutions:
+            assert res % 8 == 0, f"Resolution {res} is not divisible by 8"
+
+    def test_from_yaml(self):
+        data = {
+            "model_path": "test/model",
+            "prompt": "test prompt",
+            "guidance_scale": 5.0,
+            "stage_resolutions": [512, 1024],
+            "stage_steps": [40, 10],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(data, f)
+            tmp_path = f.name
+
+        try:
+            config = GenerationConfig.from_yaml(tmp_path)
+            assert config.model_path == "test/model"
+            assert config.prompt == "test prompt"
+            assert config.guidance_scale == 5.0
+            assert config.stage_resolutions == [512, 1024]
+        finally:
+            os.unlink(tmp_path)
+
+    def test_from_yaml_ignores_unknown_keys(self):
+        data = {"model_path": "test/model", "unknown_key": "value"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(data, f)
+            tmp_path = f.name
+
+        try:
+            config = GenerationConfig.from_yaml(tmp_path)
+            assert config.model_path == "test/model"
+            assert not hasattr(config, "unknown_key")
+        finally:
+            os.unlink(tmp_path)
+
+    def test_custom_resolutions(self):
+        """Verify custom stage configurations work."""
+        config = GenerationConfig(
+            stage_resolutions=[512, 1024, 2048],
+            stage_steps=[40, 5, 5],
+        )
+        assert config.stage_resolutions[-1] == 2048
+        assert sum(config.stage_steps) == 50
+
+    def test_available_models_list(self):
+        """Verify AVAILABLE_MODELS is populated."""
+        assert len(AVAILABLE_MODELS) >= 3
+        assert "text2earth" in AVAILABLE_MODELS
+        assert "diffusionsat" in AVAILABLE_MODELS
+        assert "geosynth" in AVAILABLE_MODELS
+
+    def test_available_techniques_list(self):
+        """Verify AVAILABLE_TECHNIQUES is populated."""
+        assert len(AVAILABLE_TECHNIQUES) >= 6
+        assert "megafusion" in AVAILABLE_TECHNIQUES
+        assert "multidiffusion" in AVAILABLE_TECHNIQUES
+
+    def test_model_name_field(self):
+        config = GenerationConfig(model_name="diffusionsat")
+        assert config.model_name == "diffusionsat"
+
+    def test_technique_field(self):
+        config = GenerationConfig(technique="multidiffusion")
+        assert config.technique == "multidiffusion"
+
+    def test_ckpt_dir_default(self):
+        config = GenerationConfig()
+        assert config.ckpt_dir == "./ckpt"
+
+    def test_ckpt_dir_custom(self):
+        config = GenerationConfig(ckpt_dir="/data/models")
+        assert config.ckpt_dir == "/data/models"
+
+    def test_deterministic_default(self):
+        """Deterministic mode defaults to False."""
+        config = GenerationConfig()
+        assert config.deterministic is False
+
+    def test_deterministic_enabled(self):
+        config = GenerationConfig(deterministic=True)
+        assert config.deterministic is True
+
+    def test_from_yaml_with_deterministic(self):
+        data = {
+            "model_path": "test/model",
+            "prompt": "test",
+            "deterministic": True,
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(data, f)
+            tmp_path = f.name
+        try:
+            config = GenerationConfig.from_yaml(tmp_path)
+            assert config.deterministic is True
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestReproducibility:
+    """Tests for deterministic sampling helpers."""
+
+    def test_seed_everything_seeds_random(self):
+        """_seed_everything should make random.random() deterministic."""
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = random.random()
+        _seed_everything(42)
+        b = random.random()
+        assert a == b
+
+    def test_seed_everything_seeds_numpy(self):
+        """_seed_everything should make numpy random deterministic."""
+        import numpy as np
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = np.random.rand()
+        _seed_everything(42)
+        b = np.random.rand()
+        assert a == b
+
+    def test_seed_everything_seeds_torch(self):
+        """_seed_everything should make torch random deterministic."""
+        import torch
+        from rsgen8k.generate import _seed_everything
+
+        _seed_everything(42)
+        a = torch.randn(3)
+        _seed_everything(42)
+        b = torch.randn(3)
+        assert torch.equal(a, b)
+
+    def test_make_generator_is_cpu(self):
+        """_make_generator should return a CPU generator."""
+        from rsgen8k.generate import _make_generator
+
+        gen = _make_generator(42)
+        assert gen.device == torch.device("cpu")
+
+    def test_make_generator_deterministic_output(self):
+        """Same seed should produce identical noise tensors."""
+        from rsgen8k.generate import _make_generator
+
+        gen1 = _make_generator(123)
+        t1 = torch.randn(2, 4, 8, 8, generator=gen1)
+
+        gen2 = _make_generator(123)
+        t2 = torch.randn(2, 4, 8, 8, generator=gen2)
+
+        assert torch.equal(t1, t2)
+
+    def test_different_seeds_produce_different_output(self):
+        """Different seeds should produce different noise tensors."""
+        from rsgen8k.generate import _make_generator
+
+        gen1 = _make_generator(42)
+        t1 = torch.randn(2, 4, 8, 8, generator=gen1)
+
+        gen2 = _make_generator(99)
+        t2 = torch.randn(2, 4, 8, 8, generator=gen2)
+
+        assert not torch.equal(t1, t2)
