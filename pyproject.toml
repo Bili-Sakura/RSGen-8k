@@ -31,7 +31,7 @@ xformers = [
     "xformers>=0.0.20",
 ]
 demo = [
-    "gradio>=4.0.0",
+    "gradio>=6.7.0",
 ]
 
 [project.scripts]
