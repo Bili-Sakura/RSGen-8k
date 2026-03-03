@@ -66,6 +66,8 @@ def main():
     parser.add_argument("--prompt", type=str, help="Text prompt for generation")
     parser.add_argument("--negative_prompt", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="./outputs")
+    parser.add_argument("--ckpt_dir", type=str, default="./ckpt",
+                        help="Local checkpoint directory (HuggingFace repo_id layout, default: ./ckpt)")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
@@ -108,7 +110,7 @@ def main():
         config = GenerationConfig()
 
     for key in ("model_path", "model_name", "technique", "negative_prompt",
-                "output_dir", "seed", "mixed_precision", "guidance_scale",
+                "output_dir", "ckpt_dir", "seed", "mixed_precision", "guidance_scale",
                 "num_inference_steps", "stage_resolutions", "stage_steps",
                 "if_reschedule", "if_dilation"):
         val = getattr(args, key, None)

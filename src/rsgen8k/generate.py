@@ -25,7 +25,7 @@ import yaml
 from PIL import Image
 from torchvision import transforms
 
-from rsgen8k.models.model_registry import MODEL_REGISTRY, get_model_info
+from rsgen8k.models.model_registry import MODEL_REGISTRY, get_model_info, resolve_model_path
 from rsgen8k.techniques.registry import TECHNIQUE_REGISTRY, get_technique
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,7 @@ class GenerationConfig:
     prompt: str = "A high-resolution satellite image of an urban area."
     negative_prompt: str = ""
     output_dir: str = "./outputs"
+    ckpt_dir: str = "./ckpt"
     seed: Optional[int] = None
     mixed_precision: str = "fp16"
     guidance_scale: float = 7.0
@@ -111,6 +112,13 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
         logger.info("Using registered model '%s' (%s)", model_info.name, model_path)
     except KeyError:
         logger.info("Using model path directly: %s", model_path)
+
+    # Check for local checkpoint before downloading from Hub
+    model_path = resolve_model_path(model_path, ckpt_dir=config.ckpt_dir)
+    if os.path.isabs(model_path):
+        logger.info("Loading from local checkpoint: %s", model_path)
+    else:
+        logger.info("Loading from HuggingFace Hub: %s", model_path)
 
     base_res = config.stage_resolutions[0]
 
@@ -436,6 +444,8 @@ def main():
     parser.add_argument("--prompt", type=str, default=None, help="Text prompt for generation")
     parser.add_argument("--negative_prompt", type=str, default="", help="Negative prompt")
     parser.add_argument("--output_dir", type=str, default="./outputs", help="Output directory")
+    parser.add_argument("--ckpt_dir", type=str, default="./ckpt",
+                        help="Local checkpoint directory (HuggingFace repo_id layout, default: ./ckpt)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
@@ -474,7 +484,7 @@ def main():
 
     # CLI arguments override config file
     for key in ("model_path", "model_name", "technique", "prompt",
-                "negative_prompt", "output_dir", "seed",
+                "negative_prompt", "output_dir", "ckpt_dir", "seed",
                 "mixed_precision", "guidance_scale", "num_inference_steps",
                 "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation"):
         val = getattr(args, key, None)

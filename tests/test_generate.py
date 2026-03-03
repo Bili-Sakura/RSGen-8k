@@ -112,3 +112,11 @@ class TestGenerationConfig:
     def test_technique_field(self):
         config = GenerationConfig(technique="multidiffusion")
         assert config.technique == "multidiffusion"
+
+    def test_ckpt_dir_default(self):
+        config = GenerationConfig()
+        assert config.ckpt_dir == "./ckpt"
+
+    def test_ckpt_dir_custom(self):
+        config = GenerationConfig(ckpt_dir="/data/models")
+        assert config.ckpt_dir == "/data/models"

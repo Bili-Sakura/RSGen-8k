@@ -30,6 +30,9 @@ dev = [
 xformers = [
     "xformers>=0.0.20",
 ]
+demo = [
+    "gradio>=4.0.0",
+]
 
 [project.scripts]
 rsgen8k-generate = "rsgen8k.generate:main"

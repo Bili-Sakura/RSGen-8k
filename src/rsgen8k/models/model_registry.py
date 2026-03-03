@@ -2,12 +2,20 @@
 
 This module provides a registry of supported remote sensing diffusion models
 with their HuggingFace model IDs and metadata.
+
+Models can be loaded from a local checkpoint directory (default ``./ckpt``)
+using the same ``{org}/{repo}`` structure as HuggingFace, or downloaded
+automatically from the Hub when no local copy exists.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Dict, Optional
+
+# Default local checkpoint root — mirrors HuggingFace ``{org}/{repo}`` layout.
+DEFAULT_CKPT_DIR = os.path.join(".", "ckpt")
 
 
 @dataclass(frozen=True)
@@ -92,3 +100,37 @@ def get_model_info(name: str) -> BaseModelInfo:
 def list_models() -> Dict[str, BaseModelInfo]:
     """Return a copy of the full model registry."""
     return dict(MODEL_REGISTRY)
+
+
+def resolve_model_path(
+    model_id: str,
+    ckpt_dir: Optional[str] = None,
+) -> str:
+    """Resolve a model ID to a local path or HuggingFace repo ID.
+
+    Checks ``{ckpt_dir}/{model_id}`` first. If the directory exists and
+    contains a ``model_index.json`` or ``unet/`` subfolder it is returned
+    as-is (local path). Otherwise the original *model_id* is returned so
+    that diffusers will download from the HuggingFace Hub.
+
+    Args:
+        model_id: HuggingFace-style ``org/repo`` identifier.
+        ckpt_dir: Root directory for local checkpoints.  Defaults to
+            :data:`DEFAULT_CKPT_DIR` (``./ckpt``).
+
+    Returns:
+        Absolute local path when available, otherwise the original
+        *model_id* string.
+    """
+    if ckpt_dir is None:
+        ckpt_dir = DEFAULT_CKPT_DIR
+
+    local_path = os.path.join(ckpt_dir, model_id)
+    if os.path.isdir(local_path):
+        # Minimal sanity check: a diffusers model dir typically has model_index.json or unet/
+        if (
+            os.path.isfile(os.path.join(local_path, "model_index.json"))
+            or os.path.isdir(os.path.join(local_path, "unet"))
+        ):
+            return os.path.abspath(local_path)
+    return model_id

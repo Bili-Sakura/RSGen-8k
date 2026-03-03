@@ -1,11 +1,15 @@
 """Tests for the model registry."""
 
+import os
+import tempfile
+
 import pytest
 
 from rsgen8k.models.model_registry import (
     MODEL_REGISTRY,
     get_model_info,
     list_models,
+    resolve_model_path,
 )
 
 
@@ -59,3 +63,46 @@ class TestModelRegistry:
     def test_all_models_have_architecture(self):
         for key, info in MODEL_REGISTRY.items():
             assert info.architecture, f"Model {key} missing architecture"
+
+
+class TestResolveModelPath:
+    """Tests for resolve_model_path local checkpoint resolution."""
+
+    def test_returns_hub_id_when_no_local_dir(self):
+        """When no local dir exists, return the original model ID."""
+        result = resolve_model_path("lcybuaa/Text2Earth", ckpt_dir="/nonexistent")
+        assert result == "lcybuaa/Text2Earth"
+
+    def test_returns_hub_id_when_dir_exists_but_empty(self):
+        """An empty local dir should not be treated as a valid checkpoint."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = os.path.join(tmpdir, "lcybuaa", "Text2Earth")
+            os.makedirs(model_dir)
+            result = resolve_model_path("lcybuaa/Text2Earth", ckpt_dir=tmpdir)
+            assert result == "lcybuaa/Text2Earth"
+
+    def test_returns_local_path_with_model_index(self):
+        """A local dir with model_index.json should be used."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = os.path.join(tmpdir, "lcybuaa", "Text2Earth")
+            os.makedirs(model_dir)
+            with open(os.path.join(model_dir, "model_index.json"), "w") as f:
+                f.write("{}")
+            result = resolve_model_path("lcybuaa/Text2Earth", ckpt_dir=tmpdir)
+            assert os.path.isabs(result)
+            assert result == os.path.abspath(model_dir)
+
+    def test_returns_local_path_with_unet_subfolder(self):
+        """A local dir with unet/ subfolder should be used."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = os.path.join(tmpdir, "MVRL", "GeoSynth")
+            os.makedirs(os.path.join(model_dir, "unet"))
+            result = resolve_model_path("MVRL/GeoSynth", ckpt_dir=tmpdir)
+            assert os.path.isabs(result)
+            assert result == os.path.abspath(model_dir)
+
+    def test_default_ckpt_dir(self):
+        """When ckpt_dir is None the default ./ckpt is used."""
+        result = resolve_model_path("lcybuaa/Text2Earth")
+        # No local dir exists so we get the Hub ID back
+        assert result == "lcybuaa/Text2Earth"

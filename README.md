@@ -27,11 +27,14 @@ RSGen-8k applies tuning-free progressive upscaling techniques to remote sensing 
 
 ```
 RSGen-8k/
+├── app.py                # Gradio web demo
 ├── configs/              # YAML configuration files
 │   └── default.yaml      # Default generation config (512 → 8K)
+├── ckpt/                 # Local model checkpoints (HuggingFace repo_id layout)
+│   └── lcybuaa/Text2Earth/  # Example: place model files here
 ├── src/rsgen8k/          # Main Python package
 │   ├── models/           # Model components & registry
-│   │   ├── model_registry.py  # Supported base model definitions
+│   │   ├── model_registry.py  # Supported base model definitions + local path resolution
 │   │   ├── scheduler.py  # DDIM scheduler with noise rescheduling
 │   │   └── pipeline.py   # SD pipeline with stage-based timesteps
 │   ├── techniques/       # Upscaling technique implementations
@@ -46,10 +49,14 @@ RSGen-8k/
 │   │   └── xlrs_bench.py # XLRS-Bench prompt loader
 │   └── generate.py       # Multi-stage generation engine & CLI
 ├── scripts/              # Standalone scripts
-│   ├── generate.py       # Generation script with dataset support
-│   └── download_prompts.py # Preview/download XLRS-Bench prompts
-├── tests/                # Unit tests
-├── links/                # References and links
+│   ├── generate.py           # Generation script with dataset support
+│   ├── download_prompts.py   # Preview/download XLRS-Bench prompts
+│   ├── benchmark_single.sh   # Single model+technique benchmark
+│   ├── benchmark_all.sh      # Grid benchmark (all models × techniques)
+│   ├── benchmark_seeds.sh    # Multi-seed reproducibility benchmark
+│   ├── generate_dataset.sh   # Batch generation from XLRS-Bench
+│   └── evaluate.sh           # Image quality evaluation (FID, CLIP-Score, etc.)
+├── tests/                # Unit tests (70 tests)
 ├── manuscript/           # Paper / manuscript materials
 └── outputs/              # Generated images (gitignored contents)
 ```
@@ -64,6 +71,12 @@ For memory-efficient attention (recommended for high-resolution generation):
 
 ```bash
 pip install -e ".[dev,xformers]"
+```
+
+For the Gradio web demo:
+
+```bash
+pip install -e ".[dev,demo]"
 ```
 
 ## Quick Start
@@ -134,6 +147,64 @@ python scripts/generate.py \
 
 ```bash
 python scripts/generate.py --config configs/default.yaml
+```
+
+### Loading Models from Local Checkpoints
+
+Models are automatically loaded from the local `./ckpt` directory if available,
+using the same `{org}/{repo}` layout as HuggingFace. If no local copy is found,
+models are downloaded from the Hub.
+
+```bash
+# Directory layout (mirrors HuggingFace repo_id):
+ckpt/
+├── lcybuaa/Text2Earth/
+│   ├── model_index.json
+│   ├── unet/
+│   ├── vae/
+│   ├── text_encoder/
+│   ├── tokenizer/
+│   └── scheduler/
+├── BiliSakura/DiffusionSat-Single-512/
+└── MVRL/GeoSynth/
+
+# Use a custom checkpoint directory
+python scripts/generate.py --ckpt_dir /data/models --prompt "Aerial view"
+```
+
+### Gradio Web Demo
+
+Launch an interactive web interface for generation:
+
+```bash
+python app.py                         # Default: http://localhost:7860
+python app.py --port 8080 --share     # Public link via Gradio
+python app.py --ckpt_dir /data/models # Custom checkpoint directory
+```
+
+### Benchmark Scripts
+
+Production-ready shell scripts with all parameters defaulted and overridable:
+
+```bash
+# Single model+technique benchmark
+bash scripts/benchmark_single.sh
+bash scripts/benchmark_single.sh --model_name diffusionsat --technique multidiffusion
+
+# Full grid benchmark (3 models × 6 techniques = 18 combinations)
+bash scripts/benchmark_all.sh
+
+# Multi-seed reproducibility (default: 5 seeds)
+bash scripts/benchmark_seeds.sh --model_name text2earth --technique megafusion
+
+# Batch generation from XLRS-Bench dataset
+bash scripts/generate_dataset.sh --num_prompts 50
+
+# Image quality evaluation
+bash scripts/evaluate.sh --generated_dir ./outputs/benchmark/text2earth_megafusion_seed42
+
+# Override via environment variables
+MODEL_NAME=geosynth TECHNIQUE=fouriscale bash scripts/benchmark_single.sh
 ```
 
 ## How It Works

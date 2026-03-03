@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# RSGen-8k local checkpoints (large model files)
+ckpt/
