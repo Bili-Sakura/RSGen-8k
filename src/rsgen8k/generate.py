@@ -1,12 +1,13 @@
 """Multi-stage progressive generation engine for 8K remote sensing images.
 
-This module implements the MegaFusion multi-stage upscaling strategy
-on top of the Text2Earth diffusion model.  The approach generates an
-image at the model's native resolution and then progressively upscales
-through intermediate resolutions up to 8K (8192 × 8192).
+This module implements multi-stage upscaling strategies on top of various
+remote sensing diffusion models (Text2Earth, DiffusionSat, GeoSynth).
+The default technique is MegaFusion, but alternative methods such as
+MultiDiffusion, ElasticDiffusion, FreeScale, DemoFusion, and FouriScale
+are also supported.
 
-Adapted from the MegaFusion project (Wu et al., WACV 2025):
-https://github.com/haoningwu3639/MegaFusion
+Techniques adapted from their respective projects — see each technique
+module under ``rsgen8k.techniques`` for full attribution.
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ import yaml
 from PIL import Image
 from torchvision import transforms
 
+from rsgen8k.models.model_registry import MODEL_REGISTRY, get_model_info
+from rsgen8k.techniques.registry import TECHNIQUE_REGISTRY, get_technique
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -34,12 +38,18 @@ DEFAULT_STAGE_STEPS = [40, 3, 3, 2, 2]
 
 TEXT2EARTH_MODEL_ID = "lcybuaa/Text2Earth"
 
+# Available model and technique keys (for CLI help)
+AVAILABLE_MODELS = list(MODEL_REGISTRY.keys())
+AVAILABLE_TECHNIQUES = list(TECHNIQUE_REGISTRY.keys())
+
 
 @dataclass
 class GenerationConfig:
-    """Configuration for multi-stage MegaFusion generation."""
+    """Configuration for multi-stage high-resolution generation."""
 
     model_path: str = TEXT2EARTH_MODEL_ID
+    model_name: str = "text2earth"
+    technique: str = "megafusion"
     prompt: str = "A high-resolution satellite image of an urban area."
     negative_prompt: str = ""
     output_dir: str = "./outputs"
@@ -71,7 +81,10 @@ def _get_weight_dtype(mixed_precision: str) -> torch.dtype:
 
 
 def load_pipeline(config: GenerationConfig, device: torch.device):
-    """Load Text2Earth model components and construct the MegaFusion pipeline.
+    """Load model components and construct the MegaFusion pipeline.
+
+    The model is resolved from the model registry when ``config.model_name``
+    is a known key; otherwise ``config.model_path`` is used directly.
 
     Args:
         config: Generation configuration.
@@ -89,7 +102,16 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
     from rsgen8k.models.scheduler import MegaFusionDDIMScheduler
 
     weight_dtype = _get_weight_dtype(config.mixed_precision)
+
+    # Resolve model path from registry if possible
     model_path = config.model_path
+    try:
+        model_info = get_model_info(config.model_name)
+        model_path = model_info.model_id
+        logger.info("Using registered model '%s' (%s)", model_info.name, model_path)
+    except KeyError:
+        logger.info("Using model path directly: %s", model_path)
+
     base_res = config.stage_resolutions[0]
 
     logger.info("Loading tokenizer and text encoder from %s", model_path)
@@ -156,16 +178,13 @@ def _encode_image(
 
 
 def generate(config: GenerationConfig) -> Image.Image:
-    """Run multi-stage MegaFusion generation at progressively higher resolutions.
+    """Run multi-stage generation at progressively higher resolutions.
 
-    This is the main entry point for generation.  It performs the following
-    stages:
-
-    1. Generate at base resolution (e.g. 512 × 512) using the full early
-       portion of the denoising schedule.
-    2. For each subsequent resolution, bicubic-upsample the predicted clean
-       image, re-encode to latent space, add noise at the appropriate
-       timestep, and denoise for a small number of steps.
+    The technique used is determined by ``config.technique``.  The default
+    is ``"megafusion"`` which uses the MegaFusion multi-stage approach.
+    Other supported techniques include ``"multidiffusion"``,
+    ``"elasticdiffusion"``, ``"freescale"``, ``"demofusion"``, and
+    ``"fouriscale"``.
 
     Args:
         config: Generation configuration.
@@ -175,6 +194,10 @@ def generate(config: GenerationConfig) -> Image.Image:
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     weight_dtype = _get_weight_dtype(config.mixed_precision)
+
+    technique_key = config.technique.lower()
+    technique_info = get_technique(technique_key)
+    logger.info("Using technique: %s", technique_info.name)
 
     pipeline, vae, schedulers = load_pipeline(config, device)
 
@@ -202,60 +225,193 @@ def generate(config: GenerationConfig) -> Image.Image:
         cumulative += n_steps
 
     os.makedirs(config.output_dir, exist_ok=True)
-    x_0_predict: Optional[Image.Image] = None
 
     with torch.no_grad():
-        for stage_idx, (res, stage_ts) in enumerate(zip(resolutions, stage_timesteps_list)):
-            logger.info(
-                "Stage %d/%d: resolution %d×%d  (%d steps)",
-                stage_idx + 1,
-                len(resolutions),
-                res,
-                res,
-                len(stage_ts),
+        if technique_key == "megafusion":
+            from rsgen8k.techniques.megafusion import run_megafusion
+
+            x_0_predict = run_megafusion(
+                pipeline=pipeline,
+                vae=vae,
+                schedulers=schedulers,
+                prompt=config.prompt,
+                negative_prompt=config.negative_prompt or None,
+                noise_latents=noise_latents,
+                stage_resolutions=resolutions,
+                stage_timesteps_list=stage_timesteps_list,
+                num_inference_steps=num_steps,
+                guidance_scale=config.guidance_scale,
+                if_reschedule=config.if_reschedule,
+                device=device,
+                weight_dtype=weight_dtype,
             )
-
-            if stage_idx == 0:
-                # First stage: generate from pure noise
-                pipeline.scheduler = schedulers[0]
-                _, x0_out = pipeline(
-                    prompt=config.prompt,
-                    negative_prompt=config.negative_prompt or None,
-                    height=res,
-                    width=res,
-                    latents=noise_latents,
-                    num_inference_steps=num_steps,
-                    guidance_scale=config.guidance_scale,
-                    stage_timesteps=stage_ts,
-                )
-                x_0_predict = x0_out.images[0]
-            else:
-                # Subsequent stages: upsample → encode → add noise → denoise
-                x_0_predict = x_0_predict.resize((res, res), Image.Resampling.BICUBIC)
-                latents = _encode_image(x_0_predict, vae, device, weight_dtype)
-                noise = torch.randn_like(latents)
-
-                sched = schedulers[stage_idx]
-                pipeline.scheduler = sched if config.if_reschedule else schedulers[0]
-
-                noisy_timestep_idx = min(4, len(stage_ts) - 1) if config.if_reschedule else 0
-                latents_noisy = pipeline.scheduler.add_noise(latents, noise, stage_ts[noisy_timestep_idx])
-
-                _, x0_out = pipeline(
-                    prompt=config.prompt,
-                    negative_prompt=config.negative_prompt or None,
-                    height=res,
-                    width=res,
-                    latents=latents_noisy,
-                    num_inference_steps=num_steps,
-                    guidance_scale=config.guidance_scale,
-                    stage_timesteps=stage_ts,
-                )
-                x_0_predict = x0_out.images[0]
+        else:
+            # For non-MegaFusion techniques, use a unified multi-stage loop
+            # that delegates per-step denoising to the chosen technique.
+            x_0_predict = _run_technique_multistage(
+                technique_key=technique_key,
+                pipeline=pipeline,
+                vae=vae,
+                schedulers=schedulers,
+                prompt=config.prompt,
+                negative_prompt=config.negative_prompt or None,
+                noise_latents=noise_latents,
+                stage_resolutions=resolutions,
+                stage_timesteps_list=stage_timesteps_list,
+                num_inference_steps=num_steps,
+                guidance_scale=config.guidance_scale,
+                if_reschedule=config.if_reschedule,
+                device=device,
+                weight_dtype=weight_dtype,
+            )
 
     output_path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_{resolutions[-1]}px.png")
     x_0_predict.save(output_path)
     logger.info("Saved output to %s", output_path)
+
+    return x_0_predict
+
+
+def _run_technique_multistage(
+    technique_key: str,
+    pipeline,
+    vae: torch.nn.Module,
+    schedulers,
+    prompt: str,
+    negative_prompt: Optional[str],
+    noise_latents: torch.FloatTensor,
+    stage_resolutions: List[int],
+    stage_timesteps_list: List[torch.Tensor],
+    num_inference_steps: int,
+    guidance_scale: float,
+    if_reschedule: bool,
+    device: torch.device,
+    weight_dtype: torch.dtype,
+) -> Image.Image:
+    """Run multi-stage generation using a per-step technique.
+
+    This function wraps MultiDiffusion, ElasticDiffusion, FreeScale,
+    DemoFusion, and FouriScale into the same multi-stage progressive
+    upscaling loop used by MegaFusion (base generation → upsample →
+    re-encode → denoise).  The per-step denoising behaviour is delegated
+    to the selected technique's denoise function.
+    """
+    x_0_predict: Optional[Image.Image] = None
+    prev_latents: Optional[torch.FloatTensor] = None
+
+    for stage_idx, (res, stage_ts) in enumerate(
+        zip(stage_resolutions, stage_timesteps_list)
+    ):
+        logger.info(
+            "%s stage %d/%d: %d×%d (%d steps)",
+            technique_key,
+            stage_idx + 1,
+            len(stage_resolutions),
+            res,
+            res,
+            len(stage_ts),
+        )
+
+        sched = schedulers[stage_idx] if if_reschedule else schedulers[0]
+        pipeline.scheduler = sched
+
+        # Prepare latents for this stage
+        if stage_idx == 0:
+            latents = noise_latents
+        else:
+            x_0_predict = x_0_predict.resize((res, res), Image.Resampling.BICUBIC)
+            latents = _encode_image(x_0_predict, vae, device, weight_dtype)
+            noise = torch.randn_like(latents)
+            noisy_idx = min(4, len(stage_ts) - 1) if if_reschedule else 0
+            latents = pipeline.scheduler.add_noise(latents, noise, stage_ts[noisy_idx])
+
+        # Encode text prompt
+        text_embeddings = pipeline._encode_prompt(
+            prompt,
+            device,
+            num_images_per_prompt=1,
+            do_classifier_free_guidance=guidance_scale > 1.0,
+            negative_prompt=negative_prompt,
+        )
+
+        base_latent_size = stage_resolutions[0] // 8
+        total_steps = len(stage_ts)
+
+        # Run per-step denoising with selected technique
+        for step_idx, t in enumerate(stage_ts):
+            if technique_key == "multidiffusion":
+                from rsgen8k.techniques.multi_diffusion import multidiffusion_denoise_step
+
+                latents = multidiffusion_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                )
+            elif technique_key == "elasticdiffusion":
+                from rsgen8k.techniques.elastic_diffusion import elastic_diffusion_denoise_step
+
+                latents = elastic_diffusion_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                    base_size=base_latent_size,
+                )
+            elif technique_key == "freescale":
+                from rsgen8k.techniques.freescale import freescale_denoise_step
+
+                latents = freescale_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                    step_index=step_idx,
+                    total_steps=total_steps,
+                    base_size=base_latent_size,
+                )
+            elif technique_key == "demofusion":
+                from rsgen8k.techniques.demofusion import demofusion_denoise_step
+
+                latents = demofusion_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                    skip_residual=prev_latents,
+                )
+            elif technique_key == "fouriscale":
+                from rsgen8k.techniques.fouriscale import fouriscale_denoise_step
+
+                latents = fouriscale_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                    base_size=base_latent_size,
+                )
+            else:
+                raise ValueError(f"Unsupported technique: {technique_key}")
+
+        prev_latents = latents.clone()
+
+        # Decode latents to image
+        decoded = pipeline.decode_latents(latents)
+        if isinstance(decoded, torch.Tensor):
+            from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+            x_0_predict = DiffusionPipeline.numpy_to_pil(decoded)[0]
+        else:
+            x_0_predict = pipeline.numpy_to_pil(decoded)[0]
 
     return x_0_predict
 
@@ -269,6 +425,14 @@ def main():
     parser = argparse.ArgumentParser(description="RSGen-8k: Remote Sensing Image Generation at 8K Resolution")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML configuration file")
     parser.add_argument("--model_path", type=str, default=TEXT2EARTH_MODEL_ID, help="HuggingFace model ID or local path")
+    parser.add_argument(
+        "--model_name", type=str, default="text2earth",
+        help=f"Registered model name. Available: {', '.join(AVAILABLE_MODELS)}",
+    )
+    parser.add_argument(
+        "--technique", type=str, default="megafusion",
+        help=f"Upscaling technique. Available: {', '.join(AVAILABLE_TECHNIQUES)}",
+    )
     parser.add_argument("--prompt", type=str, default=None, help="Text prompt for generation")
     parser.add_argument("--negative_prompt", type=str, default="", help="Negative prompt")
     parser.add_argument("--output_dir", type=str, default="./outputs", help="Output directory")
@@ -282,9 +446,26 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
+    parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    if args.list_models:
+        from rsgen8k.models.model_registry import list_models
+        print("\nAvailable base models:")
+        for key, info in list_models().items():
+            print(f"  {key:20s} {info.name} ({info.model_id})")
+        sys.exit(0)
+
+    if args.list_techniques:
+        from rsgen8k.techniques.registry import list_techniques
+        print("\nAvailable techniques:")
+        for key, info in list_techniques().items():
+            print(f"  {key:20s} {info.name}")
+            print(f"  {'':20s} {info.description[:80]}")
+        sys.exit(0)
 
     if args.config:
         config = GenerationConfig.from_yaml(args.config)
@@ -292,7 +473,8 @@ def main():
         config = GenerationConfig()
 
     # CLI arguments override config file
-    for key in ("model_path", "prompt", "negative_prompt", "output_dir", "seed",
+    for key in ("model_path", "model_name", "technique", "prompt",
+                "negative_prompt", "output_dir", "seed",
                 "mixed_precision", "guidance_scale", "num_inference_steps",
                 "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation"):
         val = getattr(args, key, None)

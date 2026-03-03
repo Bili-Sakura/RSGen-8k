@@ -6,7 +6,13 @@ import tempfile
 import pytest
 import yaml
 
-from rsgen8k.generate import GenerationConfig, DEFAULT_STAGE_RESOLUTIONS, DEFAULT_STAGE_STEPS
+from rsgen8k.generate import (
+    GenerationConfig,
+    DEFAULT_STAGE_RESOLUTIONS,
+    DEFAULT_STAGE_STEPS,
+    AVAILABLE_MODELS,
+    AVAILABLE_TECHNIQUES,
+)
 
 
 class TestGenerationConfig:
@@ -15,6 +21,8 @@ class TestGenerationConfig:
     def test_default_values(self):
         config = GenerationConfig()
         assert config.model_path == "lcybuaa/Text2Earth"
+        assert config.model_name == "text2earth"
+        assert config.technique == "megafusion"
         assert config.guidance_scale == 7.0
         assert config.num_inference_steps == 50
         assert config.stage_resolutions == list(DEFAULT_STAGE_RESOLUTIONS)
@@ -83,3 +91,24 @@ class TestGenerationConfig:
         )
         assert config.stage_resolutions[-1] == 2048
         assert sum(config.stage_steps) == 50
+
+    def test_available_models_list(self):
+        """Verify AVAILABLE_MODELS is populated."""
+        assert len(AVAILABLE_MODELS) >= 3
+        assert "text2earth" in AVAILABLE_MODELS
+        assert "diffusionsat" in AVAILABLE_MODELS
+        assert "geosynth" in AVAILABLE_MODELS
+
+    def test_available_techniques_list(self):
+        """Verify AVAILABLE_TECHNIQUES is populated."""
+        assert len(AVAILABLE_TECHNIQUES) >= 6
+        assert "megafusion" in AVAILABLE_TECHNIQUES
+        assert "multidiffusion" in AVAILABLE_TECHNIQUES
+
+    def test_model_name_field(self):
+        config = GenerationConfig(model_name="diffusionsat")
+        assert config.model_name == "diffusionsat"
+
+    def test_technique_field(self):
+        config = GenerationConfig(technique="multidiffusion")
+        assert config.technique == "multidiffusion"

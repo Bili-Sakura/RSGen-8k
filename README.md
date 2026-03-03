@@ -2,7 +2,26 @@
 
 **Remote Sensing Image Generation Scaling to 8K Resolution**
 
-RSGen-8k applies [MegaFusion](https://github.com/haoningwu3639/MegaFusion) — a tuning-free progressive upscaling technique — to the [Text2Earth](https://huggingface.co/lcybuaa/Text2Earth) diffusion model, enabling text-to-image generation of remote sensing imagery at up to 8192 × 8192 (8K) resolution. Text prompts are sourced from the [XLRS-Bench](https://huggingface.co/datasets/initiacms/XLRS-Bench_caption_en) ultra-high-resolution remote sensing caption dataset.
+RSGen-8k applies tuning-free progressive upscaling techniques to remote sensing diffusion models, enabling text-to-image generation of satellite imagery at up to 8192 × 8192 (8K) resolution. Text prompts are sourced from the [XLRS-Bench](https://huggingface.co/datasets/initiacms/XLRS-Bench_caption_en) ultra-high-resolution remote sensing caption dataset.
+
+## Supported Base Models
+
+| Model | HuggingFace ID | Architecture |
+|-------|---------------|--------------|
+| [Text2Earth](https://huggingface.co/lcybuaa/Text2Earth) | `lcybuaa/Text2Earth` | SD 1.5 |
+| [DiffusionSat-Single-512](https://huggingface.co/BiliSakura/DiffusionSat-Single-512) | `BiliSakura/DiffusionSat-Single-512` | SD 1.5 |
+| [GeoSynth](https://huggingface.co/MVRL/GeoSynth) | `MVRL/GeoSynth` | SD 1.5 |
+
+## Supported Upscaling Techniques
+
+| Technique | Paper | Source |
+|-----------|-------|--------|
+| [MegaFusion](https://github.com/haoningwu3639/MegaFusion) | Wu et al., WACV 2025 | Multi-stage progressive denoising with noise rescheduling |
+| [ElasticDiffusion](https://github.com/MoayedHajiAli/ElasticDiffusion-official) | Haji Ali et al., CVPR 2024 | Global-local content separation for arbitrary-size generation |
+| [MultiDiffusion](https://github.com/omerbt/MultiDiffusion) | Bar-Tal et al., ICML 2023 | Sliding-window view fusion with consensus voting |
+| [FreeScale](https://github.com/ali-vilab/FreeScale) | Qiu et al., arXiv 2024 | Cosine-scheduled scale fusion via attention modification |
+| [DemoFusion](https://github.com/PRIS-CV/DemoFusion) | Du et al., CVPR 2024 | Progressive upscaling with dilated sampling and skip-residuals |
+| [FouriScale](https://github.com/LeonHLJ/FouriScale) | Huang et al., ECCV 2024 | Frequency-domain low-pass filtering for structural consistency |
 
 ## Project Structure
 
@@ -11,9 +30,18 @@ RSGen-8k/
 ├── configs/              # YAML configuration files
 │   └── default.yaml      # Default generation config (512 → 8K)
 ├── src/rsgen8k/          # Main Python package
-│   ├── models/           # MegaFusion model components
+│   ├── models/           # Model components & registry
+│   │   ├── model_registry.py  # Supported base model definitions
 │   │   ├── scheduler.py  # DDIM scheduler with noise rescheduling
 │   │   └── pipeline.py   # SD pipeline with stage-based timesteps
+│   ├── techniques/       # Upscaling technique implementations
+│   │   ├── registry.py   # Technique registry & metadata
+│   │   ├── megafusion.py # MegaFusion (Wu et al., WACV 2025)
+│   │   ├── elastic_diffusion.py  # ElasticDiffusion (Haji Ali et al., CVPR 2024)
+│   │   ├── multi_diffusion.py    # MultiDiffusion (Bar-Tal et al., ICML 2023)
+│   │   ├── freescale.py  # FreeScale (Qiu et al., 2024)
+│   │   ├── demofusion.py # DemoFusion (Du et al., CVPR 2024)
+│   │   └── fouriscale.py # FouriScale (Huang et al., ECCV 2024)
 │   ├── data/             # Dataset loading utilities
 │   │   └── xlrs_bench.py # XLRS-Bench prompt loader
 │   └── generate.py       # Multi-stage generation engine & CLI
@@ -49,6 +77,41 @@ python scripts/generate.py \
     --seed 42
 ```
 
+### Use a Different Base Model
+
+```bash
+# DiffusionSat
+python scripts/generate.py \
+    --model_name diffusionsat \
+    --prompt "Aerial view of agricultural fields"
+
+# GeoSynth
+python scripts/generate.py \
+    --model_name geosynth \
+    --prompt "Satellite image of a mountain range"
+```
+
+### Use a Different Upscaling Technique
+
+```bash
+# MultiDiffusion (sliding-window consensus)
+python scripts/generate.py \
+    --technique multidiffusion \
+    --prompt "Dense urban area"
+
+# FouriScale (frequency-domain filtering)
+python scripts/generate.py \
+    --technique fouriscale \
+    --prompt "Industrial zone with factories"
+```
+
+### List Available Models and Techniques
+
+```bash
+python scripts/generate.py --list_models
+python scripts/generate.py --list_techniques
+```
+
 ### Generate with XLRS-Bench Prompts
 
 ```bash
@@ -75,16 +138,25 @@ python scripts/generate.py --config configs/default.yaml
 
 ## How It Works
 
-RSGen-8k uses MegaFusion's multi-stage progressive generation:
+All techniques share a common multi-stage framework: generate at base resolution, then progressively upscale through intermediate resolutions to 8K. The per-step denoising behavior varies by technique:
 
-1. **Stage 1 (Base Resolution):** Generate at the model's native 512 × 512 resolution using the majority of denoising steps.
-2. **Stage 2+ (Progressive Upscaling):** For each subsequent target resolution:
-   - Bicubic-upsample the previous stage's output.
-   - Re-encode into VAE latent space.
-   - Add noise at the appropriate timestep.
-   - Denoise for a small number of steps.
+### MegaFusion (default)
+Multi-stage progressive generation with noise rescheduling. At each stage: bicubic-upsample → VAE encode → add noise → denoise for a few steps.
 
-This process repeats until reaching 8K (8192 × 8192), producing coherent ultra-high-resolution remote sensing images without any model fine-tuning.
+### MultiDiffusion
+At each denoising step, splits the latent canvas into overlapping sliding-window views, denoises each independently, and fuses via weighted-average consensus.
+
+### ElasticDiffusion
+Combines a reduced-resolution global guidance pass with patch-wise local denoising, blending global structure with local detail.
+
+### FreeScale
+Runs dual UNet passes (high-res and low-res) at each step, blending predictions via a cosine-annealed schedule.
+
+### DemoFusion
+Applies dilated sampling with skip-residual connections from previous resolution phases, smoothed by Gaussian filtering.
+
+### FouriScale
+Applies low-pass Fourier filtering to noise predictions, suppressing high-frequency artifacts at out-of-distribution resolutions.
 
 ### Noise Rescheduling
 
@@ -109,8 +181,20 @@ pytest tests/ -v
 
 ## References
 
+### Base Models
 - **Text2Earth:** [huggingface.co/lcybuaa/Text2Earth](https://huggingface.co/lcybuaa/Text2Earth)
+- **DiffusionSat:** [huggingface.co/BiliSakura/DiffusionSat-Single-512](https://huggingface.co/BiliSakura/DiffusionSat-Single-512)
+- **GeoSynth:** [huggingface.co/MVRL/GeoSynth](https://huggingface.co/MVRL/GeoSynth)
+
+### Techniques
 - **MegaFusion:** Wu et al., "MegaFusion: Extend Diffusion Models towards Higher-resolution Image Generation without Further Tuning", WACV 2025. [GitHub](https://github.com/haoningwu3639/MegaFusion)
+- **ElasticDiffusion:** Haji Ali et al., "ElasticDiffusion: Training-free Arbitrary Size Image Generation through Global-Local Content Separation", CVPR 2024. [GitHub](https://github.com/MoayedHajiAli/ElasticDiffusion-official)
+- **MultiDiffusion:** Bar-Tal et al., "MultiDiffusion: Fusing Diffusion Paths for Controlled Image Generation", ICML 2023. [GitHub](https://github.com/omerbt/MultiDiffusion)
+- **FreeScale:** Qiu et al., "FreeScale: Unleashing the Resolution of Diffusion Models via Tuning-Free Scale Fusion", arXiv 2024. [GitHub](https://github.com/ali-vilab/FreeScale)
+- **DemoFusion:** Du et al., "DemoFusion: Democratising High-Resolution Image Generation With No $$$", CVPR 2024. [GitHub](https://github.com/PRIS-CV/DemoFusion)
+- **FouriScale:** Huang et al., "FouriScale: A Frequency Perspective on Training-Free High-Resolution Image Synthesis", ECCV 2024. [GitHub](https://github.com/LeonHLJ/FouriScale)
+
+### Dataset
 - **XLRS-Bench:** [huggingface.co/datasets/initiacms/XLRS-Bench_caption_en](https://huggingface.co/datasets/initiacms/XLRS-Bench_caption_en)
 
 ## License

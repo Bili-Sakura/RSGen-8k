@@ -3,8 +3,18 @@
 
 Usage examples:
 
-    # Generate with default settings (8K output)
+    # Generate with default settings (8K output, Text2Earth + MegaFusion)
     python scripts/generate.py --prompt "A satellite image of a coastal city"
+
+    # Use a different base model
+    python scripts/generate.py --model_name diffusionsat --prompt "Aerial view of farmland"
+
+    # Use a different upscaling technique
+    python scripts/generate.py --technique multidiffusion --prompt "Urban area"
+
+    # List available models and techniques
+    python scripts/generate.py --list_models
+    python scripts/generate.py --list_techniques
 
     # Generate at custom resolution stages
     python scripts/generate.py \\
@@ -27,7 +37,14 @@ import os
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from rsgen8k.generate import GenerationConfig, generate, DEFAULT_STAGE_RESOLUTIONS, DEFAULT_STAGE_STEPS
+from rsgen8k.generate import (
+    GenerationConfig,
+    generate,
+    DEFAULT_STAGE_RESOLUTIONS,
+    DEFAULT_STAGE_STEPS,
+    AVAILABLE_MODELS,
+    AVAILABLE_TECHNIQUES,
+)
 
 
 def main():
@@ -38,6 +55,14 @@ def main():
     )
     parser.add_argument("--config", type=str, help="Path to YAML configuration file")
     parser.add_argument("--model_path", type=str, default="lcybuaa/Text2Earth")
+    parser.add_argument(
+        "--model_name", type=str, default="text2earth",
+        help=f"Registered model name. Available: {', '.join(AVAILABLE_MODELS)}",
+    )
+    parser.add_argument(
+        "--technique", type=str, default="megafusion",
+        help=f"Upscaling technique. Available: {', '.join(AVAILABLE_TECHNIQUES)}",
+    )
     parser.add_argument("--prompt", type=str, help="Text prompt for generation")
     parser.add_argument("--negative_prompt", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="./outputs")
@@ -51,6 +76,8 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
+    parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
 
     # Dataset-based generation
     parser.add_argument("--from_dataset", action="store_true", help="Load prompts from XLRS-Bench dataset")
@@ -60,14 +87,30 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+    if args.list_models:
+        from rsgen8k.models.model_registry import list_models
+        print("\nAvailable base models:")
+        for key, info in list_models().items():
+            print(f"  {key:20s} {info.name} ({info.model_id})")
+        return
+
+    if args.list_techniques:
+        from rsgen8k.techniques.registry import list_techniques
+        print("\nAvailable techniques:")
+        for key, info in list_techniques().items():
+            print(f"  {key:20s} {info.name}")
+            print(f"  {'':20s} {info.description[:80]}")
+        return
+
     if args.config:
         config = GenerationConfig.from_yaml(args.config)
     else:
         config = GenerationConfig()
 
-    for key in ("model_path", "negative_prompt", "output_dir", "seed",
-                "mixed_precision", "guidance_scale", "num_inference_steps",
-                "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation"):
+    for key in ("model_path", "model_name", "technique", "negative_prompt",
+                "output_dir", "seed", "mixed_precision", "guidance_scale",
+                "num_inference_steps", "stage_resolutions", "stage_steps",
+                "if_reschedule", "if_dilation"):
         val = getattr(args, key, None)
         if val is not None:
             setattr(config, key, val)

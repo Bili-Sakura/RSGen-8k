@@ -4,7 +4,13 @@
 # Technique:  MegaFusion  (https://github.com/haoningwu3639/MegaFusion)
 # Prompts:    XLRS-Bench  (https://huggingface.co/datasets/initiacms/XLRS-Bench_caption_en)
 
+# Model selection (registered names: text2earth, diffusionsat, geosynth)
+model_name: "text2earth"
 model_path: "lcybuaa/Text2Earth"
+
+# Technique selection (registered names: megafusion, multidiffusion,
+#   elasticdiffusion, freescale, demofusion, fouriscale)
+technique: "megafusion"
 
 prompt: "A high-resolution satellite image of an urban area with dense buildings, roads and vegetation."
 negative_prompt: ""
