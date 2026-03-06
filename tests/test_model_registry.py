@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
@@ -102,7 +103,8 @@ class TestResolveModelPath:
             assert result == os.path.abspath(model_dir)
 
     def test_default_ckpt_dir(self):
-        """When ckpt_dir is None the default ./models is used."""
-        result = resolve_model_path("lcybuaa/Text2Earth")
-        # No local dir exists so we get the Hub ID back
+        """When ckpt_dir is None the default ckpt_dir is used. If no local dir
+        exists, return the Hub ID."""
+        with patch("rsgen8k.models.model_registry.DEFAULT_CKPT_DIR", tempfile.mkdtemp()):
+            result = resolve_model_path("lcybuaa/Text2Earth")
         assert result == "lcybuaa/Text2Earth"
