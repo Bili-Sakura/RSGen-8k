@@ -16,8 +16,13 @@ import argparse
 import logging
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+# Required for deterministic CuBLAS when torch.use_deterministic_algorithms(True) is used.
+# Must be set before any PyTorch/CUDA imports.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import gradio as gr
 
@@ -128,6 +133,8 @@ def _make_run_generation(ckpt_dir: str = "./models"):
         if batch_size < 1 or batch_size > 8:
             raise gr.Error("Batch size must be between 1 and 8.")
 
+        # Unique output dir per run (timestamp) so every image is saved without overwriting
+        output_dir = f"./outputs/gradio/run_{int(time.time() * 1000)}"
         config = GenerationConfig(
             model_name=model_name.lower(),
             technique=technique.lower(),
@@ -144,7 +151,7 @@ def _make_run_generation(ckpt_dir: str = "./models"):
             deterministic=deterministic,
             native_scheduler=(native_scheduler or "ddim").lower(),
             batch_size=batch_size,
-            output_dir="./outputs/gradio",
+            output_dir=output_dir,
             ckpt_dir=ckpt_dir,
         )
 

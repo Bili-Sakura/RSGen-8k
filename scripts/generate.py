@@ -41,6 +41,9 @@ import os
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+# Required for deterministic CuBLAS when --deterministic is used.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 from rsgen8k.generate import (
     GenerationConfig,
     generate,

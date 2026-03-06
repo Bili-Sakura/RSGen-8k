@@ -234,6 +234,17 @@ models/
 python scripts/generate.py --ckpt_dir /data/models --prompt "Aerial view"
 ```
 
+### Deploy to Hugging Face Spaces
+
+A self-contained demo is in `hf_space/` — upload that folder to create a Space. Models load from Hugging Face Hub.
+
+```bash
+cd hf_space
+# Create a new Space at huggingface.co/new-space, then:
+# git clone your-space-url .
+# Copy hf_space/* into the Space repo and push
+```
+
 ### Gradio Web Demo
 
 Launch an interactive web interface for generation:
