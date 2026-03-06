@@ -79,6 +79,18 @@ MODEL_REGISTRY: Dict[str, BaseModelInfo] = {
         ),
         url="https://huggingface.co/MVRL/GeoSynth",
     ),
+    "ddpmcd": BaseModelInfo(
+        model_id="BiliSakura/ddpm-cd-pretrained-256",
+        name="DDPM-CD Pretrained 256",
+        architecture="ddpm-sr3",
+        base_resolution=256,
+        description=(
+            "Unconditional DDPM with SR3 backbone, pre-trained on remote-sensing "
+            "imagery. 256×256 resolution. Uses DDPMScheduler (2000 steps, cosine "
+            "schedule). Image generation only (not change detection)."
+        ),
+        url="https://huggingface.co/BiliSakura/ddpm-cd-pretrained-256",
+    ),
 }
 
 

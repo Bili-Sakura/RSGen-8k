@@ -11,6 +11,7 @@ RSGen-8k applies tuning-free progressive upscaling techniques to remote sensing 
 | [Text2Earth](https://huggingface.co/lcybuaa/Text2Earth) | `lcybuaa/Text2Earth` | SD 1.5 |
 | [DiffusionSat-Single-512](https://huggingface.co/BiliSakura/DiffusionSat-Single-512) | `BiliSakura/DiffusionSat-Single-512` | SD 1.5 |
 | [GeoSynth](https://huggingface.co/MVRL/GeoSynth) | `MVRL/GeoSynth` | SD 1.5 |
+| [DDPM-CD Pretrained 256](https://huggingface.co/BiliSakura/ddpm-cd-pretrained-256) | `BiliSakura/ddpm-cd-pretrained-256` | DDPM-SR3 (unconditional) |
 
 ## Supported Upscaling Techniques
 
@@ -317,6 +318,7 @@ pytest tests/ -v
 - **Text2Earth:** [huggingface.co/lcybuaa/Text2Earth](https://huggingface.co/lcybuaa/Text2Earth)
 - **DiffusionSat:** [huggingface.co/BiliSakura/DiffusionSat-Single-512](https://huggingface.co/BiliSakura/DiffusionSat-Single-512)
 - **GeoSynth:** [huggingface.co/MVRL/GeoSynth](https://huggingface.co/MVRL/GeoSynth)
+- **DDPM-CD Pretrained 256:** [huggingface.co/BiliSakura/ddpm-cd-pretrained-256](https://huggingface.co/BiliSakura/ddpm-cd-pretrained-256)
 
 ### Techniques
 - **MegaFusion:** Wu et al., "MegaFusion: Extend Diffusion Models towards Higher-resolution Image Generation without Further Tuning", WACV 2025. [GitHub](https://github.com/haoningwu3639/MegaFusion)
