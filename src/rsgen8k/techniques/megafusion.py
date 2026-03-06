@@ -59,6 +59,7 @@ def run_megafusion(
     device: torch.device,
     weight_dtype: torch.dtype,
     generator: Optional[torch.Generator] = None,
+    resolution_cond: Optional[int] = None,
 ) -> Image.Image:
     """Execute the MegaFusion multi-stage generation loop.
 
@@ -94,18 +95,22 @@ def run_megafusion(
             len(stage_ts),
         )
 
+        pipeline_kwargs = dict(
+            prompt=prompt,
+            negative_prompt=negative_prompt or None,
+            height=res,
+            width=res,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            stage_timesteps=stage_ts,
+        )
+        if resolution_cond is not None:
+            pipeline_kwargs["resolution_cond"] = resolution_cond
+
         if stage_idx == 0:
             pipeline.scheduler = schedulers[0]
-            _, x0_out = pipeline(
-                prompt=prompt,
-                negative_prompt=negative_prompt or None,
-                height=res,
-                width=res,
-                latents=noise_latents,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                stage_timesteps=stage_ts,
-            )
+            pipeline_kwargs["latents"] = noise_latents
+            _, x0_out = pipeline(**pipeline_kwargs)
             x_0_predict = x0_out.images[0]
         else:
             x_0_predict = x_0_predict.resize(
@@ -122,16 +127,8 @@ def run_megafusion(
                 latents, noise, stage_ts[noisy_idx]
             )
 
-            _, x0_out = pipeline(
-                prompt=prompt,
-                negative_prompt=negative_prompt or None,
-                height=res,
-                width=res,
-                latents=latents_noisy,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                stage_timesteps=stage_ts,
-            )
+            pipeline_kwargs["latents"] = latents_noisy
+            _, x0_out = pipeline(**pipeline_kwargs)
             x_0_predict = x0_out.images[0]
 
     return x_0_predict

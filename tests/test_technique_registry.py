@@ -13,6 +13,7 @@ class TestTechniqueRegistry:
     """Tests for the technique registry."""
 
     EXPECTED_TECHNIQUES = [
+        "native",
         "megafusion",
         "elasticdiffusion",
         "multidiffusion",
@@ -24,6 +25,11 @@ class TestTechniqueRegistry:
     def test_all_expected_techniques_registered(self):
         for key in self.EXPECTED_TECHNIQUES:
             assert key in TECHNIQUE_REGISTRY, f"Technique '{key}' not found"
+
+    def test_get_technique_native(self):
+        info = get_technique("native")
+        assert info.name == "Native DDIM"
+        assert "DDIM" in info.description
 
     def test_get_technique_megafusion(self):
         info = get_technique("megafusion")

@@ -38,6 +38,18 @@ class TechniqueInfo:
 # ---------------------------------------------------------------------------
 
 TECHNIQUE_REGISTRY: Dict[str, TechniqueInfo] = {
+    "native": TechniqueInfo(
+        key="native",
+        name="Native DDIM",
+        description=(
+            "Standard single-stage generation with DDIM scheduler. No "
+            "multi-resolution or upscaling techniques."
+        ),
+        paper='Song et al., "Denoising Diffusion Implicit Models", ICLR 2021.',
+        github_url="https://github.com/CompVis/stable-diffusion",
+        supported_architectures=["sd1.5", "sdxl"],
+        module="rsgen8k.techniques.native",
+    ),
     "megafusion": TechniqueInfo(
         key="megafusion",
         name="MegaFusion",

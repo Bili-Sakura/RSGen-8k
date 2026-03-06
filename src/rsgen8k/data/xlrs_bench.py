@@ -21,6 +21,7 @@ def load_xlrs_bench_prompts(
     seed: Optional[int] = None,
     caption_column: str = "caption_en",
     streaming: bool = False,
+    dataset_path: Optional[str] = None,
 ) -> List[str]:
     """Load text prompts from the XLRS-Bench caption dataset.
 
@@ -34,19 +35,33 @@ def load_xlrs_bench_prompts(
             when the specified column is not present.
         streaming: When *True*, load the dataset in streaming mode to
             avoid downloading the entire dataset at once.
+        dataset_path: When provided, load from this local path (e.g. from
+            ``datasets.load_from_disk``) instead of the HuggingFace Hub.
 
     Returns:
         A list of prompt strings.
     """
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset, load_from_disk
     except ImportError as exc:
         raise ImportError(
             "The `datasets` package is required to load XLRS-Bench prompts. "
             "Install it with: pip install datasets"
         ) from exc
 
-    dataset = load_dataset(DATASET_ID, split=split, streaming=streaming)
+    if dataset_path:
+        if streaming:
+            raise ValueError("Streaming is not supported when loading from a local dataset path.")
+        import glob
+        import os
+        train_dir = os.path.join(dataset_path, split)
+        arrow_files = glob.glob(os.path.join(train_dir, "*.arrow"))
+        if arrow_files:
+            dataset = load_dataset("arrow", data_files={split: arrow_files}, split=split)
+        else:
+            dataset = load_from_disk(dataset_path)[split]
+    else:
+        dataset = load_dataset(DATASET_ID, split=split, streaming=streaming)
 
     # Determine the correct caption column name
     if streaming:
@@ -57,7 +72,7 @@ def load_xlrs_bench_prompts(
 
     if caption_column not in columns:
         # Fallback to common column names
-        for fallback in ("text", "caption", "prompt"):
+        for fallback in ("text", "caption", "prompt", "question", "answer"):
             if fallback in columns:
                 caption_column = fallback
                 break

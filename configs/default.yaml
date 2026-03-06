@@ -20,6 +20,14 @@ technique: "megafusion"
 prompt: "A high-resolution satellite image of an urban area with dense buildings, roads and vegetation."
 negative_prompt: ""
 
+# Text2Earth GSD: GOOGLE_LEVEL for ground sampling distance conditioning.
+# Level 18 = high resolution (~0.6m). Used when model has resolution conditioning.
+google_level: 18
+
+# Native technique options (ignored by megafusion, etc.)
+batch_size: 1
+native_scheduler: "ddim"  # ddim, euler, euler_ancestral, dpmsolver_multistep, pndm, lms, heun, dpm2
+
 output_dir: "./outputs"
 seed: 42
 
