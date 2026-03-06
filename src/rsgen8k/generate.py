@@ -630,8 +630,9 @@ def _run_technique_multistage(
         do_cfg = guidance_scale > 1.0
         class_labels = None
         unet = pipeline.unet
+        num_embeds = getattr(unet.config, "num_class_embeds", 0) or 0
         needs_class_labels = (
-            getattr(unet.config, "num_class_embeds", 0) > 0
+            num_embeds > 0
             or getattr(unet, "class_embedding", None) is not None
         )
         if needs_class_labels:
