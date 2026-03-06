@@ -5,6 +5,7 @@ datasets/
 models/
 discard/
 outputs/
+outputs_test/
 downloads/
 logs/
 site/

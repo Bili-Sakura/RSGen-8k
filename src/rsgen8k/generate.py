@@ -63,7 +63,7 @@ class GenerationConfig:
     output_dir: str = "./outputs"
     ckpt_dir: str = "./models"
     seed: Optional[int] = None
-    mixed_precision: str = "fp16"
+    mixed_precision: str = "bf16"
     guidance_scale: float = 7.0
     num_inference_steps: int = 50
     stage_resolutions: List[int] = field(default_factory=lambda: list(DEFAULT_STAGE_RESOLUTIONS))
@@ -153,6 +153,9 @@ def _load_native_scheduler(model_path: str, scheduler_name: str):
 
     base = DDIMScheduler.from_pretrained(model_path, subfolder="scheduler")
     config = dict(base.config)
+    # Text2Earth / SD 2.0 use epsilon prediction; DDIM config may not specify it
+    if "prediction_type" not in config:
+        config["prediction_type"] = "epsilon"
 
     cls_map = {
         "ddim": DDIMScheduler,
@@ -368,7 +371,7 @@ def generate(config: GenerationConfig) -> Image.Image:
             elif generator is not None:
                 gen = generator
 
-            _, x0_out = pipeline(
+            image_out, x0_out = pipeline(
                 prompt=prompts,
                 negative_prompt=config.negative_prompt or None,
                 height=res,
@@ -378,7 +381,8 @@ def generate(config: GenerationConfig) -> Image.Image:
                 generator=gen,
                 resolution_cond=config.google_level,
             )
-            images = x0_out.images  # List[PIL.Image]
+            # Use decoded final latents (image_out) - canonical denoised result
+            images = image_out.images  # List[PIL.Image]
             x_0_predict = images[0] if len(images) == 1 else images
         elif technique_key == "megafusion":
             from rsgen8k.techniques.megafusion import run_megafusion
@@ -608,7 +612,7 @@ def main():
     parser.add_argument("--ckpt_dir", type=str, default="./models",
                         help="Local checkpoint directory (HuggingFace repo_id layout, default: ./models)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
-    parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
+    parser.add_argument("--mixed_precision", type=str, default="bf16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--stage_resolutions", type=int, nargs="+", default=DEFAULT_STAGE_RESOLUTIONS)

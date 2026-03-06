@@ -235,7 +235,7 @@ def build_demo(ckpt_dir: str = "./models") -> gr.Blocks:
                 with gr.Row():
                     mixed_precision = gr.Dropdown(
                         choices=["fp16", "bf16", "no"],
-                        value="fp16",
+                        value="bf16",
                         label="Precision",
                     )
                     enable_reschedule = gr.Checkbox(

@@ -31,7 +31,7 @@ native_scheduler: "ddim"  # ddim, euler, euler_ancestral, dpmsolver_multistep, p
 output_dir: "./outputs"
 seed: 42
 
-mixed_precision: "fp16"
+mixed_precision: "bf16"
 guidance_scale: 7.0
 num_inference_steps: 50
 

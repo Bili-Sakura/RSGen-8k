@@ -73,7 +73,7 @@ def main():
     parser.add_argument("--ckpt_dir", type=str, default="./models",
                         help="Local checkpoint directory (HuggingFace repo_id layout, default: ./models)")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
+    parser.add_argument("--mixed_precision", type=str, default="bf16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--stage_resolutions", type=int, nargs="+", default=DEFAULT_STAGE_RESOLUTIONS)
