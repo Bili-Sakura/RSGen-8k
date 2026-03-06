@@ -13,6 +13,7 @@ module under ``rsgen8k.techniques`` for full attribution.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -73,6 +74,7 @@ class GenerationConfig:
     enable_xformers: bool = True
     vae_tiling: bool = True
     deterministic: bool = False
+    save_metadata: bool = True  # Save metadata.json alongside each generated image
 
     @classmethod
     def from_yaml(cls, path: str) -> "GenerationConfig":
@@ -112,6 +114,52 @@ def _make_generator(seed: int) -> torch.Generator:
     resulting tensors are then moved to the target device.
     """
     return torch.Generator(device="cpu").manual_seed(seed)
+
+
+def _save_inference_metadata(
+    output_path: str,
+    config: GenerationConfig,
+    sample_seed: int,
+    resolution: int,
+    prompt: Optional[str] = None,
+    batch_index: Optional[int] = None,
+) -> None:
+    """Save inference metadata as JSON alongside the generated image.
+
+    Writes {output_path_without_ext}_metadata.json with inference details
+    for reproducibility.
+    """
+    if not config.save_metadata:
+        return
+    base, _ = os.path.splitext(output_path)
+    metadata_path = f"{base}_metadata.json"
+    image_filename = os.path.basename(output_path)
+    metadata = {
+        "image": image_filename,
+        "prompt": prompt if prompt is not None else config.prompt,
+        "negative_prompt": config.negative_prompt or "",
+        "seed": sample_seed,
+        "model_name": config.model_name,
+        "model_path": config.model_path,
+        "technique": config.technique,
+        "resolution": resolution,
+        "stage_resolutions": config.stage_resolutions,
+        "stage_steps": config.stage_steps,
+        "num_inference_steps": config.num_inference_steps,
+        "guidance_scale": config.guidance_scale,
+        "if_reschedule": config.if_reschedule,
+        "mixed_precision": config.mixed_precision,
+        "deterministic": config.deterministic,
+        "google_level": config.google_level,
+    }
+    if config.technique.lower() == "native":
+        metadata["native_scheduler"] = config.native_scheduler
+        metadata["batch_size"] = getattr(config, "batch_size", 1)
+    if batch_index is not None:
+        metadata["batch_index"] = batch_index
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info("Saved metadata to %s", metadata_path)
 
 
 # Schedulers supported for native technique (SD-compatible)
@@ -179,15 +227,14 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
     The model is resolved from the model registry when ``config.model_name``
     is a known key; otherwise ``config.model_path`` is used directly.
 
-    Args:
-        config: Generation configuration.
-        device: Target torch device.
+    For unconditional models (e.g. ddpmcd), loads the custom pipeline and
+    returns (pipeline, None, None).
 
     Returns:
-        A tuple ``(pipeline, vae, schedulers)`` where *schedulers* is a list
-        of :class:`MegaFusionDDIMScheduler` instances (one per stage).
+        A tuple ``(pipeline, vae, schedulers)``. For ddpmcd, vae and schedulers
+        are None; pipeline has a .generate() method.
     """
-    from diffusers import AutoencoderKL
+    from diffusers import AutoencoderKL, DiffusionPipeline
     from diffusers.utils.import_utils import is_xformers_available
     from transformers import AutoTokenizer, CLIPTextModel
 
@@ -198,6 +245,7 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
 
     # Resolve model path from registry if possible
     model_path = config.model_path
+    model_info = None
     try:
         model_info = get_model_info(config.model_name)
         model_path = model_info.model_id
@@ -211,6 +259,23 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
         logger.info("Loading from local checkpoint: %s", model_path)
     else:
         logger.info("Loading from HuggingFace Hub: %s", model_path)
+
+    # DDPM-CD: unconditional model, uses custom pipeline (no tokenizer/text_encoder)
+    if model_info and model_info.architecture == "ddpm-sr3":
+        logger.info("Loading DDPM-CD pipeline (unconditional)")
+        pipeline = DiffusionPipeline.from_pretrained(
+            model_path,
+            custom_pipeline="pipeline",
+            trust_remote_code=True,
+        )
+        pipeline.to(device)
+        # Keep in float32: custom pipeline uses float tensors internally
+        if config.enable_xformers and is_xformers_available():
+            try:
+                pipeline.enable_xformers_memory_efficient_attention()
+            except Exception as exc:
+                logger.warning("Could not enable xformers: %s", exc)
+        return pipeline, None, None
 
     base_res = config.stage_resolutions[0]
 
@@ -281,6 +346,45 @@ def _encode_image(
     return latents
 
 
+def _generate_ddpmcd(
+    config: GenerationConfig,
+    pipeline,
+    device: torch.device,
+    generator: Optional[torch.Generator],
+    sample_seed: int,
+) -> Image.Image:
+    """Run unconditional DDPM-CD generation (256×256 pixel-space)."""
+    os.makedirs(config.output_dir, exist_ok=True)
+    num_steps = getattr(config, "num_inference_steps", 1000) or 1000
+    gen = None
+    if generator is not None and device.type == "cuda":
+        gen = torch.Generator(device=device).manual_seed(generator.initial_seed())
+    elif generator is not None:
+        gen = generator
+
+    with torch.no_grad():
+        image_tensor = pipeline.generate(
+            batch_size=1,
+            in_channels=3,
+            image_size=256,
+            num_inference_steps=num_steps,
+            generator=gen,
+        )
+    # Tensor (1,3,256,256) in [0,1] or similar; convert to PIL
+    img = image_tensor.squeeze(0).cpu().float()
+    if img.max() <= 1.0:
+        img = (img * 255).clamp(0, 255).byte()
+    else:
+        img = ((img + 1) * 127.5).clamp(0, 255).byte()
+    img = img.permute(1, 2, 0).numpy()
+    out = Image.fromarray(img)
+    path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_256px.png")
+    out.save(path)
+    logger.info("Saved output to %s", path)
+    _save_inference_metadata(path, config, sample_seed, 256, prompt="")
+    return out
+
+
 def generate(config: GenerationConfig) -> Image.Image:
     """Run multi-stage generation at progressively higher resolutions.
 
@@ -325,6 +429,10 @@ def generate(config: GenerationConfig) -> Image.Image:
 
     pipeline, vae, schedulers = load_pipeline(config, device)
 
+    # DDPM-CD: unconditional pixel-space generation
+    if vae is None:
+        return _generate_ddpmcd(config, pipeline, device, generator, sample_seed)
+
     base_res = config.stage_resolutions[0]
     if technique_key_lower == "native":
         target_res = config.stage_resolutions[-1] if config.stage_resolutions else 1024
@@ -350,6 +458,8 @@ def generate(config: GenerationConfig) -> Image.Image:
 
     os.makedirs(config.output_dir, exist_ok=True)
 
+    used_prompts: List[str] = [config.prompt]
+
     with torch.no_grad():
         if technique_key == "native":
             batch_size = getattr(config, "batch_size", 1)
@@ -358,6 +468,7 @@ def generate(config: GenerationConfig) -> Image.Image:
 
             # Build batch prompts
             prompts = [config.prompt] * batch_size if isinstance(config.prompt, str) else config.prompt
+            used_prompts = list(prompts)
             if len(prompts) != batch_size:
                 prompts = (prompts * (batch_size // len(prompts) + 1))[:batch_size]
 
@@ -420,6 +531,7 @@ def generate(config: GenerationConfig) -> Image.Image:
                 num_inference_steps=num_steps,
                 guidance_scale=config.guidance_scale,
                 if_reschedule=config.if_reschedule,
+                resolution_cond=config.google_level,
                 device=device,
                 weight_dtype=weight_dtype,
                 generator=generator,
@@ -434,12 +546,18 @@ def generate(config: GenerationConfig) -> Image.Image:
             )
             img.save(path)
             logger.info("Saved output to %s", path)
+            prompt_i = used_prompts[i] if i < len(used_prompts) else config.prompt
+            _save_inference_metadata(
+                path, config, sample_seed, out_res,
+                prompt=prompt_i, batch_index=i,
+            )
     else:
         output_path = os.path.join(
             config.output_dir, f"rsgen8k_seed{sample_seed}_{out_res}px.png"
         )
         x_0_predict.save(output_path)
         logger.info("Saved output to %s", output_path)
+        _save_inference_metadata(output_path, config, sample_seed, out_res)
 
     return x_0_predict
 
@@ -457,8 +575,9 @@ def _run_technique_multistage(
     num_inference_steps: int,
     guidance_scale: float,
     if_reschedule: bool,
-    device: torch.device,
-    weight_dtype: torch.dtype,
+    resolution_cond: Optional[int] = None,
+    device: torch.device = None,
+    weight_dtype: torch.dtype = None,
     generator: Optional[torch.Generator] = None,
 ) -> Image.Image:
     """Run multi-stage generation using a per-step technique.
@@ -507,6 +626,22 @@ def _run_technique_multistage(
             negative_prompt=negative_prompt,
         )
 
+        # Text2Earth / class conditioning: build class_labels when model requires it
+        do_cfg = guidance_scale > 1.0
+        class_labels = None
+        unet = pipeline.unet
+        num_embeds = getattr(unet.config, "num_class_embeds", 0) or 0
+        needs_class_labels = (
+            num_embeds > 0
+            or getattr(unet, "class_embedding", None) is not None
+        )
+        if needs_class_labels:
+            n = 1
+            res_null = torch.zeros(n, dtype=latents.dtype, device=device)
+            cond_val = float(resolution_cond if resolution_cond is not None else res)
+            res_cond = torch.full((n,), cond_val, dtype=latents.dtype, device=device)
+            class_labels = torch.cat([res_null, res_cond]) if do_cfg else res_cond
+
         base_latent_size = stage_resolutions[0] // 8
         total_steps = len(stage_ts)
 
@@ -522,6 +657,7 @@ def _run_technique_multistage(
                     text_embeddings=text_embeddings,
                     t=t,
                     guidance_scale=guidance_scale,
+                    class_labels=class_labels,
                 )
             elif technique_key == "elasticdiffusion":
                 from rsgen8k.techniques.elastic_diffusion import elastic_diffusion_denoise_step
@@ -534,6 +670,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             elif technique_key == "freescale":
                 from rsgen8k.techniques.freescale import freescale_denoise_step
@@ -548,6 +685,7 @@ def _run_technique_multistage(
                     step_index=step_idx,
                     total_steps=total_steps,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             elif technique_key == "demofusion":
                 from rsgen8k.techniques.demofusion import demofusion_denoise_step
@@ -560,6 +698,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     skip_residual=prev_latents,
+                    class_labels=class_labels,
                 )
             elif technique_key == "fouriscale":
                 from rsgen8k.techniques.fouriscale import fouriscale_denoise_step
@@ -572,6 +711,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             else:
                 raise ValueError(f"Unsupported technique: {technique_key}")
@@ -621,6 +761,8 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--no_save_metadata", action="store_true",
+                        help="Disable saving metadata.json alongside generated images (default: save metadata)")
     parser.add_argument("--deterministic", action="store_true",
                         help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
     parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
@@ -661,6 +803,7 @@ def main():
 
     config.enable_xformers = not args.no_xformers
     config.vae_tiling = not args.no_vae_tiling
+    config.save_metadata = not args.no_save_metadata
 
     if config.prompt is None:
         logger.error("No prompt specified. Use --prompt or --config.")

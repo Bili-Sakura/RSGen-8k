@@ -67,6 +67,7 @@ def fouriscale_denoise_step(
     guidance_scale: float,
     base_size: int = 64,
     cutoff_ratio: float = 0.5,
+    class_labels: Optional[torch.Tensor] = None,
 ) -> torch.FloatTensor:
     """Perform one FouriScale denoising step.
 
@@ -93,9 +94,10 @@ def fouriscale_denoise_step(
     latent_input = torch.cat([latents] * 2) if do_cfg else latents
     latent_input = scheduler.scale_model_input(latent_input, t)
 
-    noise_pred = unet(
-        latent_input, t, encoder_hidden_states=text_embeddings
-    ).sample.to(dtype=latents.dtype)
+    unet_kwargs = {"encoder_hidden_states": text_embeddings}
+    if class_labels is not None:
+        unet_kwargs["class_labels"] = class_labels
+    noise_pred = unet(latent_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
 
     if do_cfg:
         u, c = noise_pred.chunk(2)

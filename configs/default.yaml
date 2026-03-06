@@ -65,3 +65,6 @@ deterministic: false
 # Performance options
 enable_xformers: true
 vae_tiling: true
+
+# Save metadata.json alongside each generated image (prompt, seed, hyperparams)
+save_metadata: true
