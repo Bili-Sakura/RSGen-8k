@@ -8,9 +8,10 @@ version = "0.1.0"
 description = "Remote Sensing Image Generation Scaling to 8K Resolution via MegaFusion"
 readme = "README.md"
 license = {text = "Apache-2.0"}
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0.0",
+    "torchaudio>=2.0.0",
     "torchvision>=0.15.0",
     "diffusers>=0.28.0",
     "transformers>=4.30.0",
@@ -32,6 +33,9 @@ xformers = [
 ]
 demo = [
     "gradio>=6.7.0",
+]
+swanlab = [
+    "swanlab",
 ]
 
 [project.scripts]

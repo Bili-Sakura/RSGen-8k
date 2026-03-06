@@ -63,6 +63,35 @@ RSGen-8k/
 
 ## Installation
 
+### Conda Setup (Recommended)
+
+Recommended environment with PyTorch 2.8.0 (CUDA 12.6):
+
+```bash
+conda create -n rsgen python=3.12
+conda activate rsgen
+# PyTorch 2.8.0 + CUDA 12.6 from https://download.pytorch.org/whl/cu126
+# Other versions generally work — follow https://pytorch.org/get-started/previous-versions/
+pip install torch==2.8.0+cu126 torchaudio==2.8.0+cu126 torchvision==0.23.0+cu126 --index-url https://download.pytorch.org/whl/cu126
+# Install other packages
+pip install -r requirements.txt
+pip install swanlab
+```
+
+Or use the setup script:
+
+```bash
+bash scripts/setup_env.sh
+```
+
+Optional (extra optimizers):
+
+```bash
+# pip install muon-optimizer  # Uncomment if needed
+```
+
+### Editable Install (After Conda Setup)
+
 ```bash
 pip install -e ".[dev]"
 ```
