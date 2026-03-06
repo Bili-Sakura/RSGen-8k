@@ -35,6 +35,25 @@ from rsgen8k.techniques.registry import list_techniques
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Scheduler choices (native technique only)
+# ---------------------------------------------------------------------------
+SCHEDULER_CHOICES = [
+    "ddim",
+    "euler",
+    "euler_ancestral",
+    "dpmsolver_multistep",
+    "dpmsolver_singlestep",
+    "pndm",
+    "lms",
+    "heun",
+    "dpm2",
+    "dpm2_ancestral",
+]
+
+# Max history entries to keep in gallery
+MAX_HISTORY_IMAGES = 24
+
+# ---------------------------------------------------------------------------
 # Presets for resolution stages
 # ---------------------------------------------------------------------------
 RESOLUTION_PRESETS = {
@@ -79,8 +98,11 @@ def _make_run_generation(ckpt_dir: str = "./models"):
         enable_reschedule: bool,
         enable_vae_tiling: bool,
         deterministic: bool,
+        native_scheduler: str,
+        batch_size: int,
+        history: list,
     ):
-        """Run generation and return the resulting image."""
+        """Run generation and return gallery images plus updated history."""
         # Resolve resolution stages
         if resolution_preset != "Custom":
             preset = RESOLUTION_PRESETS[resolution_preset]
@@ -102,6 +124,10 @@ def _make_run_generation(ckpt_dir: str = "./models"):
                 f"number of step values ({len(stage_steps)})."
             )
 
+        batch_size = int(batch_size)
+        if batch_size < 1 or batch_size > 8:
+            raise gr.Error("Batch size must be between 1 and 8.")
+
         config = GenerationConfig(
             model_name=model_name.lower(),
             technique=technique.lower(),
@@ -116,12 +142,28 @@ def _make_run_generation(ckpt_dir: str = "./models"):
             if_reschedule=enable_reschedule,
             vae_tiling=enable_vae_tiling,
             deterministic=deterministic,
+            native_scheduler=(native_scheduler or "ddim").lower(),
+            batch_size=batch_size,
             output_dir="./outputs/gradio",
             ckpt_dir=ckpt_dir,
         )
 
-        image = generate(config)
-        return image
+        result = generate(config)
+        images = result if isinstance(result, list) else [result]
+        sample_seed = config.seed if config.seed is not None else "rand"
+
+        # Build captioned gallery items for this run
+        new_items = []
+        for i, img in enumerate(images):
+            caption = f"Seed {sample_seed}" + (f" • Batch {i + 1}/{len(images)}" if len(images) > 1 else "")
+            new_items.append((img, caption))
+
+        # Prepend new items to history (newest first for display)
+        history = history or []
+        updated_history = new_items + history
+        updated_history = updated_history[:MAX_HISTORY_IMAGES]
+
+        return updated_history, updated_history
 
     return _run_generation
 
@@ -135,6 +177,11 @@ def _update_preset(preset_name):
         gr.update(value=preset["resolutions"], interactive=False),
         gr.update(value=preset["steps"], interactive=False),
     )
+
+
+def _clear_history():
+    """Clear the gallery history."""
+    return [], []
 
 
 def build_demo(ckpt_dir: str = "./models") -> gr.Blocks:
@@ -251,12 +298,35 @@ def build_demo(ckpt_dir: str = "./models") -> gr.Blocks:
                         value=False,
                     )
 
-                generate_btn = gr.Button("🚀 Generate", variant="primary", size="lg")
+                with gr.Accordion("Advanced (Native technique)", open=False):
+                    native_scheduler = gr.Dropdown(
+                        choices=SCHEDULER_CHOICES,
+                        value="ddim",
+                        label="Scheduler",
+                        info="Used when technique is 'native'",
+                    )
+                    batch_size = gr.Slider(
+                        minimum=1,
+                        maximum=8,
+                        value=1,
+                        step=1,
+                        label="Batch Size",
+                        info="Number of images per run (native only)",
+                    )
+
+                with gr.Row():
+                    generate_btn = gr.Button("🚀 Generate", variant="primary", size="lg")
+                    clear_btn = gr.Button("🗑️ Clear History", variant="secondary")
 
             with gr.Column(scale=1):
-                output_image = gr.Image(
-                    label="Generated Image",
-                    type="pil",
+                history_state = gr.State(value=[])
+                output_gallery = gr.Gallery(
+                    label="Generated Images",
+                    columns=4,
+                    rows=2,
+                    height="auto",
+                    object_fit="contain",
+                    show_label=True,
                 )
 
         # Wire preset selector to update custom fields
@@ -284,8 +354,18 @@ def build_demo(ckpt_dir: str = "./models") -> gr.Blocks:
                 enable_reschedule,
                 enable_vae_tiling,
                 deterministic,
+                native_scheduler,
+                batch_size,
+                history_state,
             ],
-            outputs=[output_image],
+            outputs=[output_gallery, history_state],
+        )
+
+        # Wire clear history button
+        clear_btn.click(
+            fn=_clear_history,
+            inputs=[],
+            outputs=[output_gallery, history_state],
         )
 
         with gr.Accordion("ℹ️ Available Models", open=False):

@@ -179,15 +179,14 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
     The model is resolved from the model registry when ``config.model_name``
     is a known key; otherwise ``config.model_path`` is used directly.
 
-    Args:
-        config: Generation configuration.
-        device: Target torch device.
+    For unconditional models (e.g. ddpmcd), loads the custom pipeline and
+    returns (pipeline, None, None).
 
     Returns:
-        A tuple ``(pipeline, vae, schedulers)`` where *schedulers* is a list
-        of :class:`MegaFusionDDIMScheduler` instances (one per stage).
+        A tuple ``(pipeline, vae, schedulers)``. For ddpmcd, vae and schedulers
+        are None; pipeline has a .generate() method.
     """
-    from diffusers import AutoencoderKL
+    from diffusers import AutoencoderKL, DiffusionPipeline
     from diffusers.utils.import_utils import is_xformers_available
     from transformers import AutoTokenizer, CLIPTextModel
 
@@ -198,6 +197,7 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
 
     # Resolve model path from registry if possible
     model_path = config.model_path
+    model_info = None
     try:
         model_info = get_model_info(config.model_name)
         model_path = model_info.model_id
@@ -211,6 +211,23 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
         logger.info("Loading from local checkpoint: %s", model_path)
     else:
         logger.info("Loading from HuggingFace Hub: %s", model_path)
+
+    # DDPM-CD: unconditional model, uses custom pipeline (no tokenizer/text_encoder)
+    if model_info and model_info.architecture == "ddpm-sr3":
+        logger.info("Loading DDPM-CD pipeline (unconditional)")
+        pipeline = DiffusionPipeline.from_pretrained(
+            model_path,
+            custom_pipeline="pipeline",
+            trust_remote_code=True,
+        )
+        pipeline.to(device)
+        # Keep in float32: custom pipeline uses float tensors internally
+        if config.enable_xformers and is_xformers_available():
+            try:
+                pipeline.enable_xformers_memory_efficient_attention()
+            except Exception as exc:
+                logger.warning("Could not enable xformers: %s", exc)
+        return pipeline, None, None
 
     base_res = config.stage_resolutions[0]
 
@@ -281,6 +298,44 @@ def _encode_image(
     return latents
 
 
+def _generate_ddpmcd(
+    config: GenerationConfig,
+    pipeline,
+    device: torch.device,
+    generator: Optional[torch.Generator],
+    sample_seed: int,
+) -> Image.Image:
+    """Run unconditional DDPM-CD generation (256×256 pixel-space)."""
+    os.makedirs(config.output_dir, exist_ok=True)
+    num_steps = getattr(config, "num_inference_steps", 1000) or 1000
+    gen = None
+    if generator is not None and device.type == "cuda":
+        gen = torch.Generator(device=device).manual_seed(generator.initial_seed())
+    elif generator is not None:
+        gen = generator
+
+    with torch.no_grad():
+        image_tensor = pipeline.generate(
+            batch_size=1,
+            in_channels=3,
+            image_size=256,
+            num_inference_steps=num_steps,
+            generator=gen,
+        )
+    # Tensor (1,3,256,256) in [0,1] or similar; convert to PIL
+    img = image_tensor.squeeze(0).cpu().float()
+    if img.max() <= 1.0:
+        img = (img * 255).clamp(0, 255).byte()
+    else:
+        img = ((img + 1) * 127.5).clamp(0, 255).byte()
+    img = img.permute(1, 2, 0).numpy()
+    out = Image.fromarray(img)
+    path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_256px.png")
+    out.save(path)
+    logger.info("Saved output to %s", path)
+    return out
+
+
 def generate(config: GenerationConfig) -> Image.Image:
     """Run multi-stage generation at progressively higher resolutions.
 
@@ -324,6 +379,10 @@ def generate(config: GenerationConfig) -> Image.Image:
     logger.info("Using technique: %s", technique_info.name)
 
     pipeline, vae, schedulers = load_pipeline(config, device)
+
+    # DDPM-CD: unconditional pixel-space generation
+    if vae is None:
+        return _generate_ddpmcd(config, pipeline, device, generator, sample_seed)
 
     base_res = config.stage_resolutions[0]
     if technique_key_lower == "native":
