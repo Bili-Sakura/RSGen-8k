@@ -31,6 +31,9 @@ dev = [
 xformers = [
     "xformers>=0.0.20",
 ]
+flash-attn = [
+    "flash-attn>=2.5.0",
+]
 demo = [
     "gradio>=6.7.0",
 ]

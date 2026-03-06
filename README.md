@@ -91,6 +91,35 @@ Optional (extra optimizers):
 # pip install muon-optimizer  # Uncomment if needed
 ```
 
+### Post-install: Memory-efficient Attention (xformers / flash-attn)
+
+For faster inference and lower VRAM usage at high resolutions, install one of:
+
+**xformers** (recommended, easiest):
+
+```bash
+pip install xformers
+# Or with editable install:
+pip install -e ".[dev,xformers]"
+```
+
+xformers works with most PyTorch/CUDA combos. If you hit compatibility issues, check [xformers releases](https://github.com/facebookresearch/xformers/releases) for your PyTorch version.
+
+**flash-attn** (often faster, stricter requirements):
+
+```bash
+# Option A: Prebuilt wheels (recommended) — visit https://flashattn.dev/
+# Select your PyTorch, CUDA, and Python versions, then run the generated pip command.
+
+# Option B: From source (requires CUDA toolkit + ninja)
+pip install flash-attn --no-build-isolation
+# On low RAM: MAX_JOBS=4 pip install flash-attn --no-build-isolation
+```
+
+flash-attn supports PyTorch 2.3–2.9 and CUDA 11.8, 12.1–12.8. Prebuilt wheels skip ~30 min compile time.
+
+RSGen-8k auto-enables xformers when available. Disable with `--no_xformers` if needed.
+
 ### Editable Install (After Conda Setup)
 
 ```bash
@@ -100,7 +129,8 @@ pip install -e ".[dev]"
 For memory-efficient attention (recommended for high-resolution generation):
 
 ```bash
-pip install -e ".[dev,xformers]"
+pip install -e ".[dev,xformers]"   # xformers (easiest)
+# pip install -e ".[dev,flash-attn]"  # flash-attn — see Post-install section
 ```
 
 For the Gradio web demo:

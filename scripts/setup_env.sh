@@ -27,4 +27,10 @@ pip install swanlab
 
 echo ""
 echo "Done! Activate with: conda activate $ENV_NAME"
-echo "Optional: pip install muon-optimizer"
+echo ""
+echo "Optional post-install (memory-efficient attention):"
+echo "  pip install xformers                    # Recommended, easiest"
+echo "  # Or flash-attn: see README Post-install section (prebuilt wheels from flashattn.dev)"
+echo ""
+echo "Optional (extra optimizers):"
+echo "  # pip install muon-optimizer"
