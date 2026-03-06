@@ -85,14 +85,14 @@ def demofusion_denoise_step(
 
     # Apply skip-residual blending from lower-resolution phase
     if skip_residual is not None:
-        # Resize skip_residual to match denoised (required when crossing stages)
-        target_size = (int(denoised.shape[2]), int(denoised.shape[3]))
-        skip_residual = F.interpolate(
-            skip_residual,
-            size=target_size,
-            mode="bilinear",
-            align_corners=False,
-        )
+        # Upsample skip_residual to match current denoised spatial size
+        if skip_residual.shape[-2:] != denoised.shape[-2:]:
+            skip_residual = F.interpolate(
+                skip_residual,
+                size=denoised.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
         blurred = _gaussian_blur(skip_residual, kernel_size=3)
         denoised = (1.0 - skip_weight) * denoised + skip_weight * blurred
 
