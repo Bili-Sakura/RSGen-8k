@@ -48,11 +48,13 @@ RSGen-8k/
 │   │   └── fouriscale.py # FouriScale (Huang et al., ECCV 2024)
 │   ├── data/             # Dataset loading utilities
 │   │   └── xlrs_bench.py # XLRS-Bench prompt loader
-│   └── generate.py       # Multi-stage generation engine & CLI
+│   ├── metrics.py       # Image quality (FID, KID, CMMD, DINO sim, CLIP-Score, LPIPS, PSNR, SSIM)
+│   └── generate.py      # Multi-stage generation engine & CLI
 ├── scripts/              # Standalone scripts
 │   ├── generate.py           # Generation script with dataset support
 │   ├── download_prompts.py   # Preview/download XLRS-Bench prompts
 │   ├── benchmark_single.sh   # Single model+technique benchmark
+│   ├── benchmark_case_study.sh  # Multi-resolution case study with metrics
 │   ├── benchmark_all.sh      # Grid benchmark (all models × techniques)
 │   ├── benchmark_seeds.sh    # Multi-seed reproducibility benchmark
 │   ├── generate_dataset.sh   # Batch generation from XLRS-Bench
@@ -262,6 +264,11 @@ bash scripts/generate_dataset.sh --num_prompts 50
 
 # Image quality evaluation
 bash scripts/evaluate.sh --generated_dir ./outputs/benchmark/text2earth_megafusion_seed42
+
+# Resolution case study (1K → 2K → 4K → 8K) with metrics
+bash scripts/benchmark_case_study.sh
+bash scripts/benchmark_case_study.sh --quick   # 1024 and 2048 only
+bash scripts/benchmark_case_study.sh --reference_dir ./data/reference  # FID, LPIPS, PSNR, SSIM
 
 # Override via environment variables
 MODEL_NAME=geosynth TECHNIQUE=fouriscale bash scripts/benchmark_single.sh

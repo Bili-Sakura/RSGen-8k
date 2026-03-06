@@ -27,6 +27,10 @@ Usage examples:
 
     # Generate with XLRS-Bench prompts
     python scripts/generate.py --from_dataset --num_prompts 5
+
+    # Native technique: batch size, scheduler, inference steps
+    python scripts/generate.py --technique native --batch_size 4 --native_scheduler euler
+    python scripts/generate.py --technique native --num_inference_steps 30 --native_scheduler dpmsolver_multistep
 """
 
 import argparse
@@ -69,7 +73,7 @@ def main():
     parser.add_argument("--ckpt_dir", type=str, default="./models",
                         help="Local checkpoint directory (HuggingFace repo_id layout, default: ./models)")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
+    parser.add_argument("--mixed_precision", type=str, default="bf16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--stage_resolutions", type=int, nargs="+", default=DEFAULT_STAGE_RESOLUTIONS)
@@ -80,11 +84,22 @@ def main():
     parser.add_argument("--no_vae_tiling", action="store_true")
     parser.add_argument("--deterministic", action="store_true",
                         help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
+    parser.add_argument("--google_level", type=int, default=18,
+                        help="Text2Earth GSD: GOOGLE_LEVEL for resolution conditioning (default: 18 = high-res)")
+
+    # Native technique options (batch, scheduler, steps)
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Batch size for native inference (default: 1)")
+    parser.add_argument("--native_scheduler", type=str, default="ddim",
+                        help="Scheduler for native: ddim, euler, euler_ancestral, dpmsolver_multistep, pndm, lms, heun, dpm2")
+
     parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
     parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
 
     # Dataset-based generation
     parser.add_argument("--from_dataset", action="store_true", help="Load prompts from XLRS-Bench dataset")
+    parser.add_argument("--dataset_path", type=str, default=None,
+                        help="Local path to XLRS-Bench dataset (default: load from HuggingFace Hub)")
     parser.add_argument("--num_prompts", type=int, default=1, help="Number of prompts to sample from dataset")
     parser.add_argument("--dataset_seed", type=int, default=42, help="Seed for sampling prompts from dataset")
 
@@ -114,7 +129,8 @@ def main():
     for key in ("model_path", "model_name", "technique", "negative_prompt",
                 "output_dir", "ckpt_dir", "seed", "mixed_precision", "guidance_scale",
                 "num_inference_steps", "stage_resolutions", "stage_steps",
-                "if_reschedule", "if_dilation", "deterministic"):
+                "if_reschedule", "if_dilation", "deterministic", "google_level",
+                "batch_size", "native_scheduler"):
         val = getattr(args, key, None)
         if val is not None:
             setattr(config, key, val)
@@ -125,7 +141,11 @@ def main():
     if args.from_dataset:
         from rsgen8k.data import load_xlrs_bench_prompts
 
-        prompts = load_xlrs_bench_prompts(num_prompts=args.num_prompts, seed=args.dataset_seed)
+        prompts = load_xlrs_bench_prompts(
+            num_prompts=args.num_prompts,
+            seed=args.dataset_seed,
+            dataset_path=args.dataset_path,
+        )
         logging.info("Loaded %d prompts from XLRS-Bench", len(prompts))
         for i, prompt in enumerate(prompts):
             logging.info("Generating image %d/%d: %s", i + 1, len(prompts), prompt[:80])

@@ -56,10 +56,14 @@ class GenerationConfig:
     technique: str = "megafusion"
     prompt: str = "A high-resolution satellite image of an urban area."
     negative_prompt: str = ""
+    google_level: int = 18  # Text2Earth GSD: level 18 = high-res (~0.6m). Used as resolution conditioning.
+    # Native technique options
+    batch_size: int = 1  # Batch size for native inference (ignored by other techniques)
+    native_scheduler: str = "ddim"  # Scheduler for native: ddim, euler, dpmsolver_multistep, pndm
     output_dir: str = "./outputs"
     ckpt_dir: str = "./models"
     seed: Optional[int] = None
-    mixed_precision: str = "fp16"
+    mixed_precision: str = "bf16"
     guidance_scale: float = 7.0
     num_inference_steps: int = 50
     stage_resolutions: List[int] = field(default_factory=lambda: list(DEFAULT_STAGE_RESOLUTIONS))
@@ -108,6 +112,65 @@ def _make_generator(seed: int) -> torch.Generator:
     resulting tensors are then moved to the target device.
     """
     return torch.Generator(device="cpu").manual_seed(seed)
+
+
+# Schedulers supported for native technique (SD-compatible)
+_NATIVE_SCHEDULERS = {
+    "ddim": "DDIMScheduler",
+    "euler": "EulerDiscreteScheduler",
+    "euler_ancestral": "EulerAncestralDiscreteScheduler",
+    "dpmsolver_multistep": "DPMSolverMultistepScheduler",
+    "dpmsolver_singlestep": "DPMSolverSinglestepScheduler",
+    "pndm": "PNDMScheduler",
+    "lms": "LMSDiscreteScheduler",
+    "heun": "HeunDiscreteScheduler",
+    "dpm2": "KDPM2DiscreteScheduler",
+    "dpm2_ancestral": "KDPM2AncestralDiscreteScheduler",
+}
+
+
+def _load_native_scheduler(model_path: str, scheduler_name: str):
+    """Load scheduler for native technique. Uses model's DDIM config as base."""
+    from diffusers import DDIMScheduler
+    from diffusers.schedulers import (
+        DPMSolverMultistepScheduler,
+        DPMSolverSinglestepScheduler,
+        EulerAncestralDiscreteScheduler,
+        EulerDiscreteScheduler,
+        HeunDiscreteScheduler,
+        KDPM2AncestralDiscreteScheduler,
+        KDPM2DiscreteScheduler,
+        LMSDiscreteScheduler,
+        PNDMScheduler,
+    )
+
+    name = scheduler_name.lower()
+    if name not in _NATIVE_SCHEDULERS:
+        available = ", ".join(sorted(_NATIVE_SCHEDULERS.keys()))
+        raise ValueError(
+            f"Unknown native scheduler '{scheduler_name}'. Available: {available}"
+        )
+
+    base = DDIMScheduler.from_pretrained(model_path, subfolder="scheduler")
+    config = dict(base.config)
+    # Text2Earth / SD 2.0 use epsilon prediction; DDIM config may not specify it
+    if "prediction_type" not in config:
+        config["prediction_type"] = "epsilon"
+
+    cls_map = {
+        "ddim": DDIMScheduler,
+        "euler": EulerDiscreteScheduler,
+        "euler_ancestral": EulerAncestralDiscreteScheduler,
+        "dpmsolver_multistep": DPMSolverMultistepScheduler,
+        "dpmsolver_singlestep": DPMSolverSinglestepScheduler,
+        "pndm": PNDMScheduler,
+        "lms": LMSDiscreteScheduler,
+        "heun": HeunDiscreteScheduler,
+        "dpm2": KDPM2DiscreteScheduler,
+        "dpm2_ancestral": KDPM2AncestralDiscreteScheduler,
+    }
+    cls = cls_map[name]
+    return cls.from_config(config)
 
 
 def load_pipeline(config: GenerationConfig, device: torch.device):
@@ -163,16 +226,20 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
 
     unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet")
 
-    # Build one scheduler per resolution stage
-    schedulers: List[MegaFusionDDIMScheduler] = []
-    for res in config.stage_resolutions:
-        sched = MegaFusionDDIMScheduler.from_pretrained(
-            model_path,
-            subfolder="scheduler",
-            base_resolution=base_res,
-            target_resolution=res,
-        )
-        schedulers.append(sched)
+    # Native technique: use selected diffusion scheduler; others use MegaFusionDDIMScheduler
+    if config.technique.lower() == "native":
+        schedulers = [_load_native_scheduler(model_path, config.native_scheduler)]
+        logger.info("Using native %s (no rescheduling)", config.native_scheduler)
+    else:
+        schedulers = []
+        for res in config.stage_resolutions:
+            sched = MegaFusionDDIMScheduler.from_pretrained(
+                model_path,
+                subfolder="scheduler",
+                base_resolution=base_res,
+                target_resolution=res,
+            )
+            schedulers.append(sched)
 
     pipeline = MegaFusionPipeline(
         vae=vae,
@@ -251,13 +318,17 @@ def generate(config: GenerationConfig) -> Image.Image:
     generator = _make_generator(sample_seed)
     logger.info("Using seed %d (deterministic=%s)", sample_seed, config.deterministic)
 
-    technique_key = config.technique.lower()
+    technique_key_lower = config.technique.lower()
+    technique_key = technique_key_lower
     technique_info = get_technique(technique_key)
     logger.info("Using technique: %s", technique_info.name)
 
     pipeline, vae, schedulers = load_pipeline(config, device)
 
     base_res = config.stage_resolutions[0]
+    if technique_key_lower == "native":
+        target_res = config.stage_resolutions[-1] if config.stage_resolutions else 1024
+        base_res = target_res
     shape = (1, vae.config.latent_channels, base_res // 8, base_res // 8)
     noise_latents = torch.randn(shape, generator=generator, device="cpu", dtype=weight_dtype).to(device)
 
@@ -265,21 +336,55 @@ def generate(config: GenerationConfig) -> Image.Image:
     steps = config.stage_steps
     num_steps = config.num_inference_steps
 
-    # Pre-compute timestep ranges for every stage
+    # Pre-compute timestep ranges for every stage (skipped for native, done in block)
     for sched in schedulers:
         sched.set_timesteps(num_steps, device=device)
 
-    cumulative = 0
     stage_timesteps_list: List[torch.Tensor] = []
-    for i, n_steps in enumerate(steps):
-        ts = schedulers[i].timesteps[cumulative: cumulative + n_steps]
-        stage_timesteps_list.append(ts)
-        cumulative += n_steps
+    if technique_key_lower != "native":
+        cumulative = 0
+        for i, n_steps in enumerate(steps):
+            ts = schedulers[i].timesteps[cumulative: cumulative + n_steps]
+            stage_timesteps_list.append(ts)
+            cumulative += n_steps
 
     os.makedirs(config.output_dir, exist_ok=True)
 
     with torch.no_grad():
-        if technique_key == "megafusion":
+        if technique_key == "native":
+            batch_size = getattr(config, "batch_size", 1)
+            res = config.stage_resolutions[-1] if config.stage_resolutions else 1024
+            num_steps = config.num_inference_steps
+
+            # Build batch prompts
+            prompts = [config.prompt] * batch_size if isinstance(config.prompt, str) else config.prompt
+            if len(prompts) != batch_size:
+                prompts = (prompts * (batch_size // len(prompts) + 1))[:batch_size]
+
+            pipeline.scheduler = schedulers[0]
+            pipeline.scheduler.set_timesteps(num_steps, device=device)
+
+            # Generator must be on same device as pipeline for prepare_latents
+            gen = None
+            if generator is not None and device.type == "cuda":
+                gen = torch.Generator(device=device).manual_seed(generator.initial_seed())
+            elif generator is not None:
+                gen = generator
+
+            image_out, x0_out = pipeline(
+                prompt=prompts,
+                negative_prompt=config.negative_prompt or None,
+                height=res,
+                width=res,
+                num_inference_steps=num_steps,
+                guidance_scale=config.guidance_scale,
+                generator=gen,
+                resolution_cond=config.google_level,
+            )
+            # Use decoded final latents (image_out) - canonical denoised result
+            images = image_out.images  # List[PIL.Image]
+            x_0_predict = images[0] if len(images) == 1 else images
+        elif technique_key == "megafusion":
             from rsgen8k.techniques.megafusion import run_megafusion
 
             x_0_predict = run_megafusion(
@@ -297,6 +402,7 @@ def generate(config: GenerationConfig) -> Image.Image:
                 device=device,
                 weight_dtype=weight_dtype,
                 generator=generator,
+                resolution_cond=config.google_level,
             )
         else:
             # For non-MegaFusion techniques, use a unified multi-stage loop
@@ -319,9 +425,21 @@ def generate(config: GenerationConfig) -> Image.Image:
                 generator=generator,
             )
 
-    output_path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_{resolutions[-1]}px.png")
-    x_0_predict.save(output_path)
-    logger.info("Saved output to %s", output_path)
+    out_res = resolutions[-1]
+    if isinstance(x_0_predict, list):
+        for i, img in enumerate(x_0_predict):
+            path = os.path.join(
+                config.output_dir,
+                f"rsgen8k_seed{sample_seed}_{out_res}px_batch{i}.png",
+            )
+            img.save(path)
+            logger.info("Saved output to %s", path)
+    else:
+        output_path = os.path.join(
+            config.output_dir, f"rsgen8k_seed{sample_seed}_{out_res}px.png"
+        )
+        x_0_predict.save(output_path)
+        logger.info("Saved output to %s", output_path)
 
     return x_0_predict
 
@@ -494,7 +612,7 @@ def main():
     parser.add_argument("--ckpt_dir", type=str, default="./models",
                         help="Local checkpoint directory (HuggingFace repo_id layout, default: ./models)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
-    parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
+    parser.add_argument("--mixed_precision", type=str, default="bf16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--stage_resolutions", type=int, nargs="+", default=DEFAULT_STAGE_RESOLUTIONS)

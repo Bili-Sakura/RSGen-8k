@@ -27,7 +27,7 @@ NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-}"
 SEED="${SEED:-42}"
 GUIDANCE_SCALE="${GUIDANCE_SCALE:-7.0}"
 NUM_INFERENCE_STEPS="${NUM_INFERENCE_STEPS:-50}"
-MIXED_PRECISION="${MIXED_PRECISION:-fp16}"
+MIXED_PRECISION="${MIXED_PRECISION:-bf16}"
 OUTPUT_DIR="${OUTPUT_DIR:-./outputs/benchmark}"
 STAGE_RESOLUTIONS="${STAGE_RESOLUTIONS:-512 1024 2048 4096 8192}"
 STAGE_STEPS="${STAGE_STEPS:-40 3 3 2 2}"
@@ -67,7 +67,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --seed INT             Random seed (default: 42)"
             echo "  --guidance_scale FLOAT  CFG scale (default: 7.0)"
             echo "  --num_inference_steps N Total denoising steps (default: 50)"
-            echo "  --mixed_precision TYPE  fp16 | bf16 | no (default: fp16)"
+            echo "  --mixed_precision TYPE  fp16 | bf16 | no (default: bf16)"
             echo "  --output_dir DIR       Output directory (default: ./outputs/benchmark)"
             echo "  --stage_resolutions R  Space-separated resolutions (default: 512 1024 2048 4096 8192)"
             echo "  --stage_steps S        Space-separated steps per stage (default: 40 3 3 2 2)"
@@ -148,11 +148,15 @@ echo "Output saved to: ${RUN_DIR}"
 echo "============================================================"
 
 # Save run metadata
+PROMPT_ESCAPED=$(printf '%s' "${PROMPT}" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+export PROMPT_ESCAPED
 python3 -c "
-import json, sys
+import json, os
+prompt_val = json.loads(os.environ.get('PROMPT_ESCAPED', '\"\"'))
 data = {
     'model_name': '${MODEL_NAME}',
     'technique': '${TECHNIQUE}',
+    'prompt': prompt_val,
     'seed': ${SEED},
     'guidance_scale': ${GUIDANCE_SCALE},
     'num_inference_steps': ${NUM_INFERENCE_STEPS},

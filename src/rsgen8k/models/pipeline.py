@@ -185,6 +185,7 @@ class MegaFusionPipeline(DiffusionPipeline):
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         stage_timesteps: Optional[torch.Tensor] = None,
+        resolution_cond: Optional[int] = None,
     ):
         """Run a (partial) denoising pass.
 
@@ -226,13 +227,27 @@ class MegaFusionPipeline(DiffusionPipeline):
         loop_timesteps = stage_timesteps if stage_timesteps is not None else self.scheduler.timesteps
         z_0_predict = None
 
+        # Text2Earth GSD conditioning: use resolution_cond (e.g. GOOGLE_LEVEL 18) when provided,
+        # otherwise height. Prompts may use "{level}_GOOGLE_LEVEL_{text}" but we pass level directly.
+        class_labels = None
+        if getattr(self.unet, "class_embedding", None) is not None:
+            n = batch_size * num_images_per_prompt
+            res_null = torch.zeros(n, dtype=latents.dtype, device=device)
+            cond_val = float(resolution_cond if resolution_cond is not None else height)
+            res_cond = torch.full((n,), cond_val, dtype=latents.dtype, device=device)
+            class_labels = torch.cat([res_null, res_cond]) if do_classifier_free_guidance else res_cond
+
         with self.progress_bar(total=len(loop_timesteps)) as progress_bar:
             for t in loop_timesteps:
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
+                unet_kwargs = {"encoder_hidden_states": text_embeddings}
+                if class_labels is not None:
+                    unet_kwargs["class_labels"] = class_labels
+
                 noise_pred = self.unet(
-                    latent_model_input, t, encoder_hidden_states=text_embeddings
+                    latent_model_input, t, **unet_kwargs
                 ).sample.to(dtype=latents.dtype)
 
                 if do_classifier_free_guidance:
@@ -240,8 +255,12 @@ class MegaFusionPipeline(DiffusionPipeline):
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 step_output = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs)
-                latents = step_output.prev_sample
-                z_0_predict = step_output.pred_original_sample
+                latents = step_output.prev_sample.to(dtype=latents.dtype)
+                z_0_predict = (
+                    step_output.pred_original_sample.to(dtype=latents.dtype)
+                    if step_output.pred_original_sample is not None
+                    else None
+                )
 
                 progress_bar.update(1)
 
