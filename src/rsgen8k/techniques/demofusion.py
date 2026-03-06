@@ -47,6 +47,7 @@ def demofusion_denoise_step(
     skip_residual: Optional[torch.FloatTensor] = None,
     skip_weight: float = 0.2,
     dilation: int = 2,
+    class_labels: Optional[torch.Tensor] = None,
 ) -> torch.FloatTensor:
     """Perform one DemoFusion denoising step with dilated sampling.
 
@@ -70,9 +71,10 @@ def demofusion_denoise_step(
     latent_input = torch.cat([latents] * 2) if do_cfg else latents
     latent_input = scheduler.scale_model_input(latent_input, t)
 
-    noise_pred = unet(
-        latent_input, t, encoder_hidden_states=text_embeddings
-    ).sample.to(dtype=latents.dtype)
+    unet_kwargs = {"encoder_hidden_states": text_embeddings}
+    if class_labels is not None:
+        unet_kwargs["class_labels"] = class_labels
+    noise_pred = unet(latent_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
 
     if do_cfg:
         u, c = noise_pred.chunk(2)

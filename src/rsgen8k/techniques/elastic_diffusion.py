@@ -56,6 +56,7 @@ def elastic_diffusion_denoise_step(
     window_size: int = 64,
     stride: int = 16,
     global_weight: float = 0.5,
+    class_labels: Optional[torch.Tensor] = None,
 ) -> torch.FloatTensor:
     """Perform one ElasticDiffusion denoising step.
 
@@ -91,9 +92,10 @@ def elastic_diffusion_denoise_step(
         torch.cat([global_latents] * 2) if do_cfg else global_latents
     )
     global_input = scheduler.scale_model_input(global_input, t)
-    global_pred = unet(
-        global_input, t, encoder_hidden_states=text_embeddings
-    ).sample.to(dtype=latents.dtype)
+    unet_kwargs = {"encoder_hidden_states": text_embeddings}
+    if class_labels is not None:
+        unet_kwargs["class_labels"] = class_labels
+    global_pred = unet(global_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
     if do_cfg:
         u, c = global_pred.chunk(2)
         global_pred = u + guidance_scale * (c - u)
@@ -111,9 +113,7 @@ def elastic_diffusion_denoise_step(
         patch = latents[:, :, r_start:r_end, c_start:c_end]
         patch_input = torch.cat([patch] * 2) if do_cfg else patch
         patch_input = scheduler.scale_model_input(patch_input, t)
-        pred = unet(
-            patch_input, t, encoder_hidden_states=text_embeddings
-        ).sample.to(dtype=latents.dtype)
+        pred = unet(patch_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
         if do_cfg:
             u, c = pred.chunk(2)
             pred = u + guidance_scale * (c - u)

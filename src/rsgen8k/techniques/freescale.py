@@ -62,6 +62,7 @@ def freescale_denoise_step(
     step_index: int,
     total_steps: int,
     base_size: int = 64,
+    class_labels: Optional[torch.Tensor] = None,
 ) -> torch.FloatTensor:
     """Perform one FreeScale denoising step with scale fusion.
 
@@ -90,11 +91,12 @@ def freescale_denoise_step(
     scale_weight = cosine_scale_schedule(step_index, total_steps)
 
     # ---- High-resolution (local) prediction ----
+    unet_kwargs = {"encoder_hidden_states": text_embeddings}
+    if class_labels is not None:
+        unet_kwargs["class_labels"] = class_labels
     hi_input = torch.cat([latents] * 2) if do_cfg else latents
     hi_input = scheduler.scale_model_input(hi_input, t)
-    hi_pred = unet(
-        hi_input, t, encoder_hidden_states=text_embeddings
-    ).sample.to(dtype=latents.dtype)
+    hi_pred = unet(hi_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
     if do_cfg:
         u, c = hi_pred.chunk(2)
         hi_pred = u + guidance_scale * (c - u)
@@ -105,9 +107,7 @@ def freescale_denoise_step(
     )
     lo_input = torch.cat([lo_latents] * 2) if do_cfg else lo_latents
     lo_input = scheduler.scale_model_input(lo_input, t)
-    lo_pred = unet(
-        lo_input, t, encoder_hidden_states=text_embeddings
-    ).sample.to(dtype=latents.dtype)
+    lo_pred = unet(lo_input, t, **unet_kwargs).sample.to(dtype=latents.dtype)
     if do_cfg:
         u, c = lo_pred.chunk(2)
         lo_pred = u + guidance_scale * (c - u)

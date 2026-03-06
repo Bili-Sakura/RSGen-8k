@@ -531,6 +531,7 @@ def generate(config: GenerationConfig) -> Image.Image:
                 num_inference_steps=num_steps,
                 guidance_scale=config.guidance_scale,
                 if_reschedule=config.if_reschedule,
+                resolution_cond=config.google_level,
                 device=device,
                 weight_dtype=weight_dtype,
                 generator=generator,
@@ -574,8 +575,9 @@ def _run_technique_multistage(
     num_inference_steps: int,
     guidance_scale: float,
     if_reschedule: bool,
-    device: torch.device,
-    weight_dtype: torch.dtype,
+    resolution_cond: Optional[int] = None,
+    device: torch.device = None,
+    weight_dtype: torch.dtype = None,
     generator: Optional[torch.Generator] = None,
 ) -> Image.Image:
     """Run multi-stage generation using a per-step technique.
@@ -624,6 +626,21 @@ def _run_technique_multistage(
             negative_prompt=negative_prompt,
         )
 
+        # Text2Earth / class conditioning: build class_labels when model requires it
+        do_cfg = guidance_scale > 1.0
+        class_labels = None
+        unet = pipeline.unet
+        needs_class_labels = (
+            getattr(unet.config, "num_class_embeds", 0) > 0
+            or getattr(unet, "class_embedding", None) is not None
+        )
+        if needs_class_labels:
+            n = 1
+            res_null = torch.zeros(n, dtype=latents.dtype, device=device)
+            cond_val = float(resolution_cond if resolution_cond is not None else res)
+            res_cond = torch.full((n,), cond_val, dtype=latents.dtype, device=device)
+            class_labels = torch.cat([res_null, res_cond]) if do_cfg else res_cond
+
         base_latent_size = stage_resolutions[0] // 8
         total_steps = len(stage_ts)
 
@@ -639,6 +656,7 @@ def _run_technique_multistage(
                     text_embeddings=text_embeddings,
                     t=t,
                     guidance_scale=guidance_scale,
+                    class_labels=class_labels,
                 )
             elif technique_key == "elasticdiffusion":
                 from rsgen8k.techniques.elastic_diffusion import elastic_diffusion_denoise_step
@@ -651,6 +669,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             elif technique_key == "freescale":
                 from rsgen8k.techniques.freescale import freescale_denoise_step
@@ -665,6 +684,7 @@ def _run_technique_multistage(
                     step_index=step_idx,
                     total_steps=total_steps,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             elif technique_key == "demofusion":
                 from rsgen8k.techniques.demofusion import demofusion_denoise_step
@@ -677,6 +697,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     skip_residual=prev_latents,
+                    class_labels=class_labels,
                 )
             elif technique_key == "fouriscale":
                 from rsgen8k.techniques.fouriscale import fouriscale_denoise_step
@@ -689,6 +710,7 @@ def _run_technique_multistage(
                     t=t,
                     guidance_scale=guidance_scale,
                     base_size=base_latent_size,
+                    class_labels=class_labels,
                 )
             else:
                 raise ValueError(f"Unsupported technique: {technique_key}")
