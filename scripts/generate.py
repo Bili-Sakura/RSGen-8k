@@ -82,6 +82,8 @@ def main():
     parser.add_argument("--if_dilation", action="store_true")
     parser.add_argument("--no_xformers", action="store_true")
     parser.add_argument("--no_vae_tiling", action="store_true")
+    parser.add_argument("--no_save_metadata", action="store_true",
+                        help="Disable saving metadata.json alongside generated images")
     parser.add_argument("--deterministic", action="store_true",
                         help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
     parser.add_argument("--google_level", type=int, default=18,
@@ -137,6 +139,7 @@ def main():
 
     config.enable_xformers = not args.no_xformers
     config.vae_tiling = not args.no_vae_tiling
+    config.save_metadata = not getattr(args, "no_save_metadata", False)
 
     if args.from_dataset:
         from rsgen8k.data import load_xlrs_bench_prompts
