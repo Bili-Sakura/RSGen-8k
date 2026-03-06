@@ -102,7 +102,7 @@ class TestResolveModelPath:
             assert result == os.path.abspath(model_dir)
 
     def test_default_ckpt_dir(self):
-        """When ckpt_dir is None the default ./ckpt is used."""
+        """When ckpt_dir is None the default ./models is used."""
         result = resolve_model_path("lcybuaa/Text2Earth")
         # No local dir exists so we get the Hub ID back
         assert result == "lcybuaa/Text2Earth"

@@ -117,7 +117,7 @@ class TestGenerationConfig:
 
     def test_ckpt_dir_default(self):
         config = GenerationConfig()
-        assert config.ckpt_dir == "./ckpt"
+        assert config.ckpt_dir == "./models"
 
     def test_ckpt_dir_custom(self):
         config = GenerationConfig(ckpt_dir="/data/models")

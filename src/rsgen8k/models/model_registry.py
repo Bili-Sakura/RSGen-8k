@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 # Default local checkpoint root — mirrors HuggingFace ``{org}/{repo}`` layout.
-DEFAULT_CKPT_DIR = os.path.join(".", "ckpt")
+DEFAULT_CKPT_DIR = os.path.join(".", "models")
 
 
 @dataclass(frozen=True)

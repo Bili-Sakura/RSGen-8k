@@ -211,13 +211,13 @@ python scripts/generate.py --config configs/default.yaml
 
 ### Loading Models from Local Checkpoints
 
-Models are automatically loaded from the local `./ckpt` directory if available,
+Models are automatically loaded from the local `./models` directory if available,
 using the same `{org}/{repo}` layout as HuggingFace. If no local copy is found,
 models are downloaded from the Hub.
 
 ```bash
 # Directory layout (mirrors HuggingFace repo_id):
-ckpt/
+models/
 ├── lcybuaa/Text2Earth/
 │   ├── model_index.json
 │   ├── unet/

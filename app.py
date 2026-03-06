@@ -61,7 +61,7 @@ RESOLUTION_PRESETS = {
 }
 
 
-def _make_run_generation(ckpt_dir: str = "./ckpt"):
+def _make_run_generation(ckpt_dir: str = "./models"):
     """Create a generation function bound to the given checkpoint directory."""
 
     def _run_generation(
@@ -137,7 +137,7 @@ def _update_preset(preset_name):
     )
 
 
-def build_demo(ckpt_dir: str = "./ckpt") -> gr.Blocks:
+def build_demo(ckpt_dir: str = "./models") -> gr.Blocks:
     """Construct the Gradio interface.
 
     Args:
@@ -168,7 +168,7 @@ def build_demo(ckpt_dir: str = "./ckpt") -> gr.Blocks:
         gr.Markdown(
             "# 🛰️ RSGen-8k: Remote Sensing Image Generation at 8K Resolution\n"
             "Generate satellite/aerial imagery from text prompts using progressive "
-            "upscaling techniques. Models load from `./ckpt` (local) or HuggingFace Hub."
+            "upscaling techniques. Models load from `./models` (local) or HuggingFace Hub."
         )
 
         with gr.Row():
@@ -302,8 +302,8 @@ def main():
     parser.add_argument("--port", type=int, default=7860, help="Port to serve on (default: 7860)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
     parser.add_argument("--share", action="store_true", help="Create a public Gradio link")
-    parser.add_argument("--ckpt_dir", type=str, default="./ckpt",
-                        help="Local checkpoint directory (default: ./ckpt)")
+    parser.add_argument("--ckpt_dir", type=str, default="./models",
+                        help="Local checkpoint directory (default: ./models)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

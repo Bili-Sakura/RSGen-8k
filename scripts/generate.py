@@ -66,8 +66,8 @@ def main():
     parser.add_argument("--prompt", type=str, help="Text prompt for generation")
     parser.add_argument("--negative_prompt", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="./outputs")
-    parser.add_argument("--ckpt_dir", type=str, default="./ckpt",
-                        help="Local checkpoint directory (HuggingFace repo_id layout, default: ./ckpt)")
+    parser.add_argument("--ckpt_dir", type=str, default="./models",
+                        help="Local checkpoint directory (HuggingFace repo_id layout, default: ./models)")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--guidance_scale", type=float, default=7.0)

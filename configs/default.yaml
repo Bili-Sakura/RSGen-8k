@@ -11,7 +11,7 @@ model_path: "lcybuaa/Text2Earth"
 # Local checkpoint directory — models are loaded from
 # {ckpt_dir}/{model_id} if the directory exists, otherwise
 # downloaded from the HuggingFace Hub.
-ckpt_dir: "./ckpt"
+ckpt_dir: "./models"
 
 # Technique selection (registered names: megafusion, multidiffusion,
 #   elasticdiffusion, freescale, demofusion, fouriscale)
