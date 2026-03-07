@@ -1,0 +1,46 @@
+# Diffusion-4K Wavelet Fine-tuning Configuration
+# ================================================
+# Wavelet-based fine-tuning for ultra-high-resolution image synthesis.
+# Reference: Zhang et al., "Diffusion-4K: Ultra-High-Resolution Image
+#            Synthesis with Latent Diffusion Models", CVPR 2025.
+#            https://github.com/zhang0jhon/diffusion-4k
+
+# Base model to fine-tune
+pretrained_model_name_or_path: "./models/lcybuaa/Text2Earth"
+
+# Training data directory (images + optional .txt caption sidecar files)
+instance_data_dir: "./data/train"
+
+# Output directory for checkpoints and final model
+output_dir: "./checkpoints/diffusion4k"
+
+# Resolution for training images (center-cropped)
+resolution: 2048
+
+# Training hyperparameters
+train_batch_size: 2
+gradient_accumulation_steps: 1
+gradient_checkpointing: true
+max_train_steps: 10000
+learning_rate: 1.0e-6
+lr_scheduler: "constant"
+lr_warmup_steps: 0
+max_grad_norm: 1.0
+
+# Memory optimisation
+mixed_precision: "bf16"
+use_8bit_adam: true
+
+# Wavelet loss configuration
+# Supported wavelets: haar (default), db1, db2, etc.
+# "haar" is recommended per the Diffusion-4K paper.
+wave: "haar"
+
+# Checkpointing
+checkpointing_steps: 5000
+
+# Reproducibility
+seed: 0
+
+# Logging (none, wandb, tensorboard)
+report_to: "none"

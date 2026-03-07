@@ -747,6 +747,18 @@ def _run_technique_multistage(
                     guidance_scale=guidance_scale,
                     class_labels=class_labels,
                 )
+            elif technique_key == "diffusion4k":
+                from rsgen8k.techniques.diffusion4k import diffusion4k_denoise_step
+
+                latents = diffusion4k_denoise_step(
+                    unet=pipeline.unet,
+                    scheduler=pipeline.scheduler,
+                    latents=latents,
+                    text_embeddings=text_embeddings,
+                    t=t,
+                    guidance_scale=guidance_scale,
+                    class_labels=class_labels,
+                )
             else:
                 raise ValueError(f"Unsupported technique: {technique_key}")
 

@@ -168,3 +168,11 @@ class TestMegaFusionTechnique:
     def test_module_imports(self):
         from rsgen8k.techniques.megafusion import run_megafusion
         assert callable(run_megafusion)
+
+
+class TestDiffusion4K:
+    """Tests for Diffusion-4K technique module."""
+
+    def test_module_imports(self):
+        from rsgen8k.techniques.diffusion4k import diffusion4k_denoise_step
+        assert callable(diffusion4k_denoise_step)
