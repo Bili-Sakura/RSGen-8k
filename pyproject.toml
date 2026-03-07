@@ -40,6 +40,10 @@ demo = [
 swanlab = [
     "swanlab",
 ]
+training = [
+    "pytorch-wavelets>=1.3.0",
+    "bitsandbytes>=0.41.0",
+]
 
 [project.scripts]
 rsgen8k-generate = "rsgen8k.generate:main"
