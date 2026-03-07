@@ -147,6 +147,22 @@ TECHNIQUE_REGISTRY: Dict[str, TechniqueInfo] = {
         supported_architectures=["sd1.5", "sdxl"],
         module="rsgen8k.techniques.fouriscale",
     ),
+    "inftydiff": TechniqueInfo(
+        key="inftydiff",
+        name="∞-Diff",
+        description=(
+            "Infinite resolution diffusion with mollified noise predictions "
+            "via DCT-domain Gaussian blur and optional coordinate "
+            "subsampling for efficient high-resolution generation."
+        ),
+        paper=(
+            'Bond-Taylor and Willcocks, "∞-Diff: Infinite Resolution '
+            'Diffusion with Subsampled Mollified States", ICLR 2024.'
+        ),
+        github_url="https://github.com/samb-t/infty-diff",
+        supported_architectures=["sd1.5", "sdxl"],
+        module="rsgen8k.techniques.infty_diff",
+    ),
 }
 
 
