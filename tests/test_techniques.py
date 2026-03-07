@@ -111,7 +111,7 @@ class TestInftyDiff:
         from rsgen8k.techniques.infty_diff import dct_gaussian_blur
         x = torch.randn(1, 4, 32, 32)
         out = dct_gaussian_blur(x, std=0.0)
-        assert torch.allclose(x, out)
+        assert torch.equal(x, out)
 
     def test_dct_gaussian_blur_smooths_signal(self):
         from rsgen8k.techniques.infty_diff import dct_gaussian_blur

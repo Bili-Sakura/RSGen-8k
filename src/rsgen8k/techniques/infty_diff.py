@@ -257,6 +257,8 @@ def inftydiff_denoise_step(
         noise_pred = dct_gaussian_blur(noise_pred, std=gaussian_std)
 
     # ---- Coordinate subsampling (Monte-Carlo integration) ----
+    # Only subsample when ratio is strictly between 0 and 1; ratios >= 1
+    # mean "use all coordinates" and are skipped for efficiency.
     if 0 < subsample_ratio < 1.0:
         _, _, lh, lw = noise_pred.shape
         indices = subsample_coordinates(lh, lw, ratio=subsample_ratio, device=noise_pred.device)
