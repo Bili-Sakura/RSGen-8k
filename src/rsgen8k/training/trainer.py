@@ -270,8 +270,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     num_update_steps_per_epoch = math.ceil(
         len(dataloader) / args.gradient_accumulation_steps
     )
+    num_train_epochs = getattr(args, "num_train_epochs", 1) or 1
     max_train_steps = args.max_train_steps or (
-        args.num_train_epochs * num_update_steps_per_epoch
+        num_train_epochs * num_update_steps_per_epoch
     )
 
     lr_scheduler = get_scheduler(
