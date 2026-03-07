@@ -98,6 +98,70 @@ class TestFouriScale:
         assert callable(fouriscale_denoise_step)
 
 
+class TestInftyDiff:
+    """Tests for ∞-Diff technique."""
+
+    def test_dct_gaussian_blur_shape(self):
+        from rsgen8k.techniques.infty_diff import dct_gaussian_blur
+        x = torch.randn(1, 4, 64, 64)
+        out = dct_gaussian_blur(x, std=1.0)
+        assert out.shape == x.shape
+
+    def test_dct_gaussian_blur_identity_at_zero_std(self):
+        from rsgen8k.techniques.infty_diff import dct_gaussian_blur
+        x = torch.randn(1, 4, 32, 32)
+        out = dct_gaussian_blur(x, std=0.0)
+        assert torch.allclose(x, out)
+
+    def test_dct_gaussian_blur_smooths_signal(self):
+        from rsgen8k.techniques.infty_diff import dct_gaussian_blur
+        x = torch.randn(1, 4, 64, 64)
+        out = dct_gaussian_blur(x, std=2.0)
+        # Blurred signal should have lower variance
+        assert out.var() < x.var()
+
+    def test_dct_gaussian_blur_nonsquare(self):
+        from rsgen8k.techniques.infty_diff import dct_gaussian_blur
+        x = torch.randn(1, 4, 48, 64)
+        out = dct_gaussian_blur(x, std=1.0)
+        assert out.shape == x.shape
+
+    def test_wiener_deconvolution_shape(self):
+        from rsgen8k.techniques.infty_diff import wiener_deconvolution
+        x = torch.randn(1, 4, 64, 64)
+        out = wiener_deconvolution(x, std=1.0, snr=100.0)
+        assert out.shape == x.shape
+
+    def test_wiener_approx_inverts_blur(self):
+        from rsgen8k.techniques.infty_diff import dct_gaussian_blur, wiener_deconvolution
+        x = torch.randn(1, 4, 64, 64)
+        blurred = dct_gaussian_blur(x, std=1.0)
+        recovered = wiener_deconvolution(blurred, std=1.0, snr=1e6)
+        assert (recovered - x).abs().mean() < 0.01
+
+    def test_subsample_coordinates_count(self):
+        from rsgen8k.techniques.infty_diff import subsample_coordinates
+        indices = subsample_coordinates(64, 64, ratio=0.25)
+        assert indices.numel() == int(64 * 64 * 0.25)
+
+    def test_subsample_coordinates_bounds(self):
+        from rsgen8k.techniques.infty_diff import subsample_coordinates
+        indices = subsample_coordinates(32, 48, ratio=0.5)
+        assert indices.min() >= 0
+        assert indices.max() < 32 * 48
+
+    def test_apply_sparse_mask_shape(self):
+        from rsgen8k.techniques.infty_diff import apply_sparse_mask, subsample_coordinates
+        x = torch.randn(1, 4, 64, 64)
+        indices = subsample_coordinates(64, 64, ratio=0.25)
+        out = apply_sparse_mask(x, indices)
+        assert out.shape == x.shape
+
+    def test_module_imports(self):
+        from rsgen8k.techniques.infty_diff import inftydiff_denoise_step
+        assert callable(inftydiff_denoise_step)
+
+
 class TestMegaFusionTechnique:
     """Tests for MegaFusion technique module."""
 

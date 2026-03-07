@@ -20,6 +20,7 @@ class TestTechniqueRegistry:
         "freescale",
         "demofusion",
         "fouriscale",
+        "inftydiff",
     ]
 
     def test_all_expected_techniques_registered(self):
@@ -60,6 +61,12 @@ class TestTechniqueRegistry:
         info = get_technique("fouriscale")
         assert info.name == "FouriScale"
         assert "ECCV 2024" in info.paper
+
+    def test_get_technique_inftydiff(self):
+        info = get_technique("inftydiff")
+        assert info.name == "∞-Diff"
+        assert "ICLR 2024" in info.paper
+        assert "sd1.5" in info.supported_architectures
 
     def test_get_technique_case_insensitive(self):
         info = get_technique("MegaFusion")
