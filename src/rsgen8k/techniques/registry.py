@@ -163,6 +163,23 @@ TECHNIQUE_REGISTRY: Dict[str, TechniqueInfo] = {
         supported_architectures=["sd1.5", "sdxl"],
         module="rsgen8k.techniques.infty_diff",
     ),
+    "diffusion4k": TechniqueInfo(
+        key="diffusion4k",
+        name="Diffusion-4K",
+        description=(
+            "Wavelet-based fine-tuning for direct ultra-high-resolution "
+            "image synthesis. A Haar DWT loss forces the model to learn "
+            "both low-frequency structure and high-frequency detail, "
+            "enabling direct 4K generation from fine-tuned weights."
+        ),
+        paper=(
+            'Zhang et al., "Diffusion-4K: Ultra-High-Resolution Image '
+            'Synthesis with Latent Diffusion Models", CVPR 2025.'
+        ),
+        github_url="https://github.com/zhang0jhon/diffusion-4k",
+        supported_architectures=["sd1.5", "sdxl", "sd3"],
+        module="rsgen8k.techniques.diffusion4k",
+    ),
 }
 
 
