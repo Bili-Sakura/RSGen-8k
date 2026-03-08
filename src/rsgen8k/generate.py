@@ -79,6 +79,9 @@ class GenerationConfig:
     vae_tiling: bool = True
     deterministic: bool = False
     save_metadata: bool = True  # Save metadata.json alongside each generated image
+    # ZoomLDM-only: SSL conditioning (not text)
+    ssl_features_path: Optional[str] = None  # Path to .npy with SSL features (B,C,H,W)
+    magnification: Optional[int] = None  # 0–3 for ZoomLDM (1x, 2x, 3x, 4x)
 
     @classmethod
     def from_yaml(cls, path: str) -> "GenerationConfig":
@@ -246,6 +249,7 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
     from rsgen8k.models.scheduler import MegaFusionDDIMScheduler
 
     weight_dtype = _get_weight_dtype(config.mixed_precision)
+    technique_key_lower = config.technique.lower()
 
     # Resolve model path from registry if possible
     model_path = config.model_path
@@ -279,6 +283,39 @@ def load_pipeline(config: GenerationConfig, device: torch.device):
         pipeline, vae, schedulers = _PIPELINE_CACHE[cache_key]
         logger.info("Using cached pipeline for model '%s'", model_path)
         return pipeline, vae, schedulers
+
+    # ZoomLDM: SSL-conditioned pipeline (no tokenizer/text_encoder)
+    if technique_key_lower == "zoomldm":
+        from pathlib import Path
+
+        zoomldm_path = Path(resolve_model_path(model_path, ckpt_dir=config.ckpt_dir))
+        if not zoomldm_path.exists():
+            zoomldm_path = Path(model_path)
+        # Add ZoomLDM-Diffusers repo for ldm.* imports; model dir may have pipeline_zoomldm
+        zoomldm_repo = os.environ.get("ZOOMLDM_REPO", str(zoomldm_path.parent))
+        for p in (zoomldm_repo, str(zoomldm_path)):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        try:
+            from pipeline_zoomldm import ZoomLDMPipeline
+        except ImportError:
+            raise ImportError(
+                "ZoomLDM requires the ZoomLDM-Diffusers repo. Clone it and add to PYTHONPATH:\n"
+                "  git clone https://github.com/Bili-Sakura/ZoomLDM-Diffusers.git zoomldm_repo\n"
+                "  export PYTHONPATH=zoomldm_repo:$PYTHONPATH"
+            )
+        pipeline = ZoomLDMPipeline.from_pretrained(
+            str(zoomldm_path),
+            variant=getattr(config, "zoomldm_variant", None),
+            device=device,
+        )
+        if config.enable_xformers and is_xformers_available():
+            try:
+                pipeline.enable_xformers_memory_efficient_attention()
+            except Exception as exc:
+                logger.warning("Could not enable xformers: %s", exc)
+        _PIPELINE_CACHE[cache_key] = (pipeline, None, None)
+        return pipeline, None, None
 
     # DDPM-CD: unconditional model, uses custom pipeline (no tokenizer/text_encoder)
     if model_info and model_info.architecture == "ddpm-sr3":
@@ -368,6 +405,96 @@ def _encode_image(
     return latents
 
 
+def _generate_zoomldm(
+    config: GenerationConfig,
+    pipeline,
+    device: torch.device,
+    generator: Optional[torch.Generator],
+    sample_seed: int,
+) -> Image.Image:
+    """Run ZoomLDM SSL-conditioned generation (256×256 by default).
+
+    Requires config.ssl_features_path (path to .npy) and config.magnification (0–3).
+    """
+    from rsgen8k.techniques.zoomldm import run_zoomldm_generation
+
+    ssl_path = getattr(config, "ssl_features_path", None)
+    mag = getattr(config, "magnification", None)
+    if not ssl_path or mag is None:
+        raise ValueError(
+            "ZoomLDM requires ssl_features_path and magnification. "
+            "Provide --ssl_features_path path/to/features.npy --magnification 0"
+        )
+    ssl_features = np.load(ssl_path).astype(np.float32)
+    if isinstance(ssl_features, np.ndarray):
+        ssl_features = torch.from_numpy(ssl_features).to(device)
+    if ssl_features.dim() == 3:
+        ssl_features = ssl_features.unsqueeze(0)
+    images = run_zoomldm_generation(
+        pipeline=pipeline,
+        ssl_features=ssl_features,
+        magnification=int(mag),
+        num_inference_steps=config.num_inference_steps,
+        guidance_scale=config.guidance_scale,
+        generator=generator,
+        device=device,
+    )
+    out = images[0]
+    os.makedirs(config.output_dir, exist_ok=True)
+    path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_zoomldm_256px.png")
+    out.save(path)
+    logger.info("Saved ZoomLDM output to %s", path)
+    _save_inference_metadata(path, config, sample_seed, 256, prompt="(ZoomLDM SSL-conditioned)")
+    return out
+
+
+
+def _generate_ddpmcd(
+    config: GenerationConfig,
+    pipeline,
+    device: torch.device,
+    generator: Optional[torch.Generator],
+    sample_seed: int,
+) -> Image.Image:
+    """Run unconditional DDPM-CD generation (256×256 pixel-space)."""
+    os.makedirs(config.output_dir, exist_ok=True)
+    num_steps = getattr(config, "num_inference_steps", 1000) or 1000
+    gen = None
+    if generator is not None and device.type == "cuda":
+        gen = torch.Generator(device=device).manual_seed(generator.initial_seed())
+    elif generator is not None:
+        gen = generator
+
+    with torch.no_grad():
+        image_tensor = pipeline.generate(
+            batch_size=1,
+            in_channels=3,
+            image_size=256,
+            num_inference_steps=num_steps,
+            generator=gen,
+        )
+    # Tensor (1,3,256,256) in [0,1] or similar; convert to PIL
+    img = image_tensor.squeeze(0).cpu().float()
+    if img.max() <= 1.0:
+        img = (img * 255).clamp(0, 255).byte()
+    else:
+        img = ((img + 1) * 127.5).clamp(0, 255).byte()
+    img = img.permute(1, 2, 0).numpy()
+    out = Image.fromarray(img)
+    path = os.path.join(config.output_dir, f"rsgen8k_seed{sample_seed}_256px.png")
+    out.save(path)
+    logger.info("Saved output to %s", path)
+    _save_inference_metadata(path, config, sample_seed, 256, prompt="")
+    return out
+
+
+
+
+
+
+
+
+
 def _generate_ddpmcd(
     config: GenerationConfig,
     pipeline,
@@ -450,6 +577,10 @@ def generate(config: GenerationConfig) -> Image.Image:
     logger.info("Using technique: %s", technique_info.name)
 
     pipeline, vae, schedulers = load_pipeline(config, device)
+
+    # ZoomLDM: SSL-conditioned generation (requires ssl_features_path + magnification)
+    if technique_key_lower == "zoomldm":
+        return _generate_zoomldm(config, pipeline, device, generator, sample_seed)
 
     # DDPM-CD: unconditional pixel-space generation
     if vae is None:
@@ -813,6 +944,10 @@ def main():
                         help="Enable fully deterministic CUDA algorithms for reproducibility (may be slower)")
     parser.add_argument("--list_models", action="store_true", help="List available base models and exit")
     parser.add_argument("--list_techniques", action="store_true", help="List available techniques and exit")
+    parser.add_argument("--ssl_features_path", type=str, default=None,
+                        help="[ZoomLDM] Path to .npy with SSL features (B,C,H,W)")
+    parser.add_argument("--magnification", type=int, default=None,
+                        help="[ZoomLDM] Magnification level 0-3 (1x, 2x, 3x, 4x)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -842,7 +977,7 @@ def main():
                 "negative_prompt", "output_dir", "ckpt_dir", "seed",
                 "mixed_precision", "guidance_scale", "num_inference_steps",
                 "stage_resolutions", "stage_steps", "if_reschedule", "if_dilation",
-                "deterministic"):
+                "deterministic", "ssl_features_path", "magnification"):
         val = getattr(args, key, None)
         if val is not None:
             setattr(config, key, val)
@@ -851,8 +986,11 @@ def main():
     config.vae_tiling = not args.no_vae_tiling
     config.save_metadata = not args.no_save_metadata
 
-    if config.prompt is None:
+    if config.technique.lower() != "zoomldm" and config.prompt is None:
         logger.error("No prompt specified. Use --prompt or --config.")
+        sys.exit(1)
+    if config.technique.lower() == "zoomldm" and (not config.ssl_features_path or config.magnification is None):
+        logger.error("ZoomLDM requires --ssl_features_path and --magnification.")
         sys.exit(1)
 
     generate(config)

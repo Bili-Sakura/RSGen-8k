@@ -180,6 +180,24 @@ TECHNIQUE_REGISTRY: Dict[str, TechniqueInfo] = {
         supported_architectures=["sd1.5", "sdxl", "sd3"],
         module="rsgen8k.techniques.diffusion4k",
     ),
+    "zoomldm": TechniqueInfo(
+        key="zoomldm",
+        name="ZoomLDM",
+        description=(
+            "Multi-scale latent diffusion with magnification-aware SSL "
+            "conditioning. Uses self-supervised embeddings (DINO-v2 for "
+            "satellite/NAIP) and zoom levels to generate coherent images "
+            "across scales up to 4096×4096. Training-based; requires "
+            "pre-extracted VAE and SSL features."
+        ),
+        paper=(
+            'Yellapragada et al., "ZoomLDM: Latent Diffusion Model for '
+            'Multi-scale Image Generation", CVPR 2025.'
+        ),
+        github_url="https://github.com/Bili-Sakura/ZoomLDM-Diffusers",
+        supported_architectures=["zoomldm"],
+        module="rsgen8k.techniques.zoomldm",
+    ),
 }
 
 
