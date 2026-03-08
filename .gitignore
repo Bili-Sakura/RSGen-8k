@@ -3,6 +3,7 @@
 ckpt/
 datasets/
 models/
+zoomldm_repo/
 discard/
 outputs/
 outputs_test/

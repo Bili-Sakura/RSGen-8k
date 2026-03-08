@@ -1,0 +1,38 @@
+# ZoomLDM Training Configuration for Remote Sensing (NAIP-style)
+# =============================================================
+# Multi-scale latent diffusion with magnification-aware SSL conditioning.
+# Reference: Yellapragada et al., "ZoomLDM: Latent Diffusion Model for
+#            Multi-scale Image Generation", CVPR 2025.
+# Source: https://github.com/Bili-Sakura/ZoomLDM-Diffusers
+#
+# Data format: Same as NAIP. Each magnification folder (1x, 2x, 3x, 4x)
+# contains:
+#   - {idx}_vae.npy   : Pre-extracted VAE latent features
+#   - {idx}_dino_grid.npy : DINO-v2 grid embeddings (SSL features)
+#   - {idx}.jpg       : Optional, for visualization
+#
+# Use DINO-v2 ViT-Large (dinov2_vitl14_reg) for satellite imagery.
+# See ZoomLDM notebooks for patch extraction and feature preprocessing.
+
+# Path to ZoomLDM base config (relative to ZoomLDM-Diffusers repo root)
+base_config: "configs/zoomldm_naip.yaml"
+
+# Override: data root for your preprocessed multi-scale dataset
+# data:
+#   params:
+#     train:
+#       params:
+#         config:
+#           root: "./data/zoomldm_rs"  # Your 1x/, 2x/, 3x/, 4x/ structure
+#           normalize_ssl: true
+#           feat_target_size: 8
+
+# Override: batch size and workers for your hardware
+# data:
+#   params:
+#     batch_size: 64
+#     num_workers: 8
+
+# Output
+output_dir: "./checkpoints/zoomldm"
+logdir: "./logs/zoomldm"
